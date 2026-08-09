@@ -287,6 +287,190 @@ final class AppCoreClientTests: XCTestCase {
         XCTAssertEqual(translatedText, "Hello!")
     }
 
+    func testTaskListEndpointsUseAuthenticatedTypedRequests() async throws {
+        let expectedPaths = ["subtasks", "risks", "questions"]
+        var receivedPaths: [String] = []
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+
+            let operation = try XCTUnwrap(request.url?.lastPathComponent)
+            receivedPaths.append(operation)
+            XCTAssertTrue(expectedPaths.contains(operation))
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["task"] as? String, "Ajouter le streaming au chat macOS")
+            XCTAssertEqual(object["language"] as? String, "fr")
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"items":["One","Two","Three","Four","Five"]}"#
+            )
+        }
+
+        let client = makeClient()
+        let language = try XCTUnwrap(LanguageCode("fr"))
+        let subtasks = try await client.generateSubtasks(
+            for: "Ajouter le streaming au chat macOS",
+            in: language
+        )
+        let risks = try await client.generateRisks(
+            for: "Ajouter le streaming au chat macOS",
+            in: language
+        )
+        let questions = try await client.generateQuestions(
+            for: "Ajouter le streaming au chat macOS",
+            in: language
+        )
+
+        XCTAssertEqual(receivedPaths, expectedPaths)
+        XCTAssertEqual(subtasks, ["One", "Two", "Three", "Four", "Five"])
+        XCTAssertEqual(risks, subtasks)
+        XCTAssertEqual(questions, subtasks)
+    }
+
+    func testTaskRequestOmitsLanguageWhenAbsent() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/ai/tasks/subtasks"
+            )
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["task"] as? String, "Ship the feature")
+            XCTAssertNil(object["language"])
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"items":["One","Two","Three","Four","Five"]}"#
+            )
+        }
+
+        _ = try await makeClient().generateSubtasks(for: "Ship the feature")
+    }
+
+    func testImproveTaskReturnsOriginalAndImprovedText() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/ai/tasks/improve"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["task"] as? String, "faire endpoint pour stream chat mac")
+            XCTAssertEqual(object["language"] as? String, "fr")
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"original":"faire endpoint pour stream chat mac","improved":"Ajouter un endpoint de streaming pour le chat macOS"}"#
+            )
+        }
+
+        let result = try await makeClient().improveTask(
+            "faire endpoint pour stream chat mac",
+            in: LanguageCode("fr")!
+        )
+
+        XCTAssertEqual(result.original, "faire endpoint pour stream chat mac")
+        XCTAssertEqual(result.improved, "Ajouter un endpoint de streaming pour le chat macOS")
+    }
+
+    func testAnalyzeTaskReturnsCombinedAnalysis() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/ai/tasks/analyze"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["task"] as? String, "Ajouter le streaming au chat macOS")
+            XCTAssertEqual(object["language"] as? String, "fr")
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"subtasks":["S1","S2","S3","S4","S5"],"risks":["R1","R2","R3","R4","R5"],"suggestedQuestions":["Q1","Q2","Q3","Q4","Q5"]}"#
+            )
+        }
+
+        let analysis = try await makeClient().analyzeTask(
+            "Ajouter le streaming au chat macOS",
+            in: LanguageCode("fr")!
+        )
+
+        XCTAssertEqual(analysis.subtasks, ["S1", "S2", "S3", "S4", "S5"])
+        XCTAssertEqual(analysis.risks, ["R1", "R2", "R3", "R4", "R5"])
+        XCTAssertEqual(analysis.suggestedQuestions, ["Q1", "Q2", "Q3", "Q4", "Q5"])
+    }
+
+    func testStreamChatSendsHistoryAndYieldsSSEEventsInOrder() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/ai/chat/stream")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/event-stream")
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["prompt"] as? String, "How should I test it?")
+            let conversation = try XCTUnwrap(object["conversation"] as? [[String: String]])
+            XCTAssertEqual(conversation, [
+                ["role": "USER", "content": "Add streaming"],
+                ["role": "ASSISTANT", "content": "Expose an SSE endpoint"],
+            ])
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                event: delta
+                data: {"text":"Hello"}
+
+                event: delta
+                data: {"text":" world"}
+
+                event: completed
+                data: {"answer":"Hello world","model":"gpt-5.6","usage":{"inputTokens":4,"outputTokens":2,"totalTokens":6}}
+
+                """
+            )
+        }
+
+        var events: [ChatStreamEvent] = []
+        for try await event in makeClient().streamChat(
+            "How should I test it?",
+            conversation: [
+                ChatMessage(role: .user, content: "Add streaming"),
+                ChatMessage(role: .assistant, content: "Expose an SSE endpoint"),
+            ]
+        ) {
+            events.append(event)
+        }
+
+        XCTAssertEqual(events, [
+            .delta("Hello"),
+            .delta(" world"),
+            .completed(ChatResponse(
+                answer: "Hello world",
+                model: "gpt-5.6",
+                usage: ChatUsage(inputTokens: 4, outputTokens: 2, totalTokens: 6)
+            )),
+        ])
+    }
+
     func testDecodesAppCoreErrorResponse() async throws {
         URLProtocolStub.requestHandler = { request in
             Self.response(

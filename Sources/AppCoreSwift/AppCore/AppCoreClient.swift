@@ -161,6 +161,74 @@ public final class AppCoreClient: Sendable {
         return response.text
     }
 
+    /// Calls `POST /api/ai/tasks/subtasks`.
+    public func generateSubtasks(
+        for task: String,
+        in language: LanguageCode? = nil
+    ) async throws -> [String] {
+        try await taskItems(operation: "subtasks", task: task, language: language)
+    }
+
+    /// Calls `POST /api/ai/tasks/risks`.
+    public func generateRisks(
+        for task: String,
+        in language: LanguageCode? = nil
+    ) async throws -> [String] {
+        try await taskItems(operation: "risks", task: task, language: language)
+    }
+
+    /// Calls `POST /api/ai/tasks/questions`.
+    public func generateQuestions(
+        for task: String,
+        in language: LanguageCode? = nil
+    ) async throws -> [String] {
+        try await taskItems(operation: "questions", task: task, language: language)
+    }
+
+    /// Calls `POST /api/ai/tasks/improve`.
+    public func improveTask(
+        _ task: String,
+        in language: LanguageCode? = nil
+    ) async throws -> ImprovedTask {
+        try await postJSON(
+            path: ["api", "ai", "tasks", "improve"],
+            body: TaskAIRequest(task: task, language: language)
+        )
+    }
+
+    /// Calls `POST /api/ai/tasks/analyze`.
+    public func analyzeTask(
+        _ task: String,
+        in language: LanguageCode? = nil
+    ) async throws -> TaskAnalysis {
+        try await postJSON(
+            path: ["api", "ai", "tasks", "analyze"],
+            body: TaskAIRequest(task: task, language: language)
+        )
+    }
+
+    /// Streams `POST /api/ai/chat/stream` as server-sent events.
+    public func streamChat(
+        _ prompt: String,
+        conversation: [ChatMessage] = []
+    ) -> AsyncThrowingStream<ChatStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await consumeChatStream(
+                        prompt: prompt,
+                        conversation: conversation,
+                        continuation: continuation
+                    )
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     /// Calls `POST /api/ai/recipes/translate`.
     public func translate(
         _ recipe: Recipe,
@@ -274,6 +342,110 @@ public final class AppCoreClient: Sendable {
         }
 
         return try await send(request)
+    }
+
+    private func taskItems(
+        operation: String,
+        task: String,
+        language: LanguageCode?
+    ) async throws -> [String] {
+        let response: TaskItemsResponse = try await postJSON(
+            path: ["api", "ai", "tasks", operation],
+            body: TaskAIRequest(task: task, language: language)
+        )
+        return response.items
+    }
+
+    private func consumeChatStream(
+        prompt: String,
+        conversation: [ChatMessage],
+        continuation: AsyncThrowingStream<ChatStreamEvent, Error>.Continuation
+    ) async throws {
+        var request = URLRequest(url: url(path: ["api", "ai", "chat", "stream"]))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue(apiKey, forHTTPHeaderField: Self.apiKeyHeader)
+        do {
+            request.httpBody = try JSONEncoder().encode(
+                ChatRequest(prompt: prompt, conversation: conversation)
+            )
+        } catch {
+            throw AppCoreClientError.encoding(String(describing: error))
+        }
+
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await session.bytes(for: request)
+        } catch let error as URLError {
+            throw AppCoreClientError.transport(error.code)
+        } catch {
+            throw AppCoreClientError.transport(.unknown)
+        }
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AppCoreClientError.invalidResponse
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            var body = Data()
+            for try await byte in bytes { body.append(byte) }
+            throw AppCoreClientError.server(
+                statusCode: httpResponse.statusCode,
+                response: try? JSONDecoder().decode(AppCoreAPIErrorResponse.self, from: body)
+            )
+        }
+
+        var frameBytes: [UInt8] = []
+        var completed = false
+        for try await byte in bytes {
+            frameBytes.append(byte)
+            let delimiterLength: Int?
+            if frameBytes.suffix(4).elementsEqual([13, 10, 13, 10]) {
+                delimiterLength = 4
+            } else if frameBytes.suffix(2).elementsEqual([10, 10]) {
+                delimiterLength = 2
+            } else {
+                delimiterLength = nil
+            }
+            if let delimiterLength {
+                let frame = String(decoding: frameBytes.dropLast(delimiterLength), as: UTF8.self)
+                if let event = try decodeChatStreamFrame(frame) {
+                    continuation.yield(event)
+                    if case .completed = event { completed = true }
+                }
+                frameBytes.removeAll(keepingCapacity: true)
+            }
+        }
+        if !frameBytes.isEmpty,
+           let event = try decodeChatStreamFrame(String(decoding: frameBytes, as: UTF8.self)) {
+            continuation.yield(event)
+            if case .completed = event { completed = true }
+        }
+        if !completed {
+            throw AppCoreClientError.decoding("Chat stream ended before the completed event")
+        }
+    }
+
+    private func decodeChatStreamFrame(_ frame: String) throws -> ChatStreamEvent? {
+        let lines = frame.split(whereSeparator: { $0.isNewline })
+        let name = lines.first(where: { $0.hasPrefix("event:") })
+            .map { String($0.dropFirst(6)).trimmingCharacters(in: .whitespaces) }
+        let dataLines = lines.filter { $0.hasPrefix("data:") }
+            .map { String($0.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+        guard let name, !dataLines.isEmpty else { return nil }
+        let data = Data(dataLines.joined(separator: "\n").utf8)
+        do {
+            switch name {
+            case "delta":
+                return .delta(try JSONDecoder().decode(ChatStreamDelta.self, from: data).text)
+            case "completed":
+                return .completed(try JSONDecoder().decode(ChatResponse.self, from: data))
+            default:
+                return nil
+            }
+        } catch {
+            throw AppCoreClientError.decoding(String(describing: error))
+        }
     }
 
     private func url(path: [String]) -> URL {

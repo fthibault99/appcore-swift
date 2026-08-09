@@ -215,6 +215,63 @@ print(translatedText)
 
 The request is sent to `POST /api/ai/texts/translate`. Text is limited to 20,000 characters by the AppCore server. The optional context is limited to 500 characters and helps resolve terminology, tone, or intended use. It is not translated or returned. Calls that do not need context can omit the argument.
 
+## Task AI
+
+Generate subtasks, risks, and assistant-ready questions for a task:
+
+```swift
+let french = LanguageCode("fr")!
+let task = "Ajouter le streaming au chat macOS"
+
+let subtasks = try await client.generateSubtasks(for: task, in: french)
+let risks = try await client.generateRisks(for: task, in: french)
+let questions = try await client.generateQuestions(for: task, in: french)
+
+let analysis = try await client.analyzeTask(task, in: french)
+print(analysis.subtasks)
+print(analysis.risks)
+print(analysis.suggestedQuestions)
+```
+
+Improve a task while retaining both versions:
+
+```swift
+let result = try await client.improveTask(
+    "faire endpoint pour stream chat mac",
+    in: french
+)
+
+print(result.original)
+print(result.improved)
+```
+
+Omit the language argument to let AppCore detect the task language. The three generation methods each return exactly five strings, as guaranteed and validated by the server. `analyzeTask` returns all three collections in one request.
+
+## Streaming chat
+
+Stream chat deltas while sending prior user and assistant messages as structured history:
+
+```swift
+let conversation = [
+    ChatMessage(role: .user, content: "I want to add streaming to my macOS app."),
+    ChatMessage(role: .assistant, content: "Start with an SSE endpoint on the backend.")
+]
+
+for try await event in client.streamChat(
+    "How should I test this approach?",
+    conversation: conversation
+) {
+    switch event {
+    case .delta(let text):
+        print(text, terminator: "")
+    case .completed(let response):
+        print("\nModel: \(response.model), tokens: \(response.usage.totalTokens ?? 0)")
+    }
+}
+```
+
+Only `.user` and `.assistant` roles are available to clients. AppCore owns the privileged developer instructions and appends the current prompt as the final user message.
+
 ## Recipes
 
 ### Extract a recipe from text
