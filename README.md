@@ -226,12 +226,19 @@ let task = "Ajouter le streaming au chat macOS"
 let subtasks = try await client.generateSubtasks(for: task, in: french)
 let risks = try await client.generateRisks(for: task, in: french)
 let questions = try await client.generateQuestions(for: task, in: french)
+let tags = try await client.suggestTags(
+    for: task,
+    existingTags: ["#Travail", "#Personnel"],
+    in: french
+)
 
 let analysis = try await client.analyzeTask(task, in: french)
 print(analysis.subtasks)
 print(analysis.risks)
 print(analysis.suggestedQuestions)
 ```
+
+Tag suggestions are sent to `POST /api/ai/tasks/tags`. AppCore receives the existing tag names so it can reuse an exact relevant tag instead of suggesting a duplicate with different case, spacing, or a missing `#`. The server returns exactly five canonical `#`-prefixed suggestions and owns all OpenAI instructions and model settings.
 
 Improve a task while retaining both versions:
 

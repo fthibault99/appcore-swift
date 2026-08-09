@@ -185,6 +185,23 @@ public final class AppCoreClient: Sendable {
         try await taskItems(operation: "questions", task: task, language: language)
     }
 
+    /// Calls `POST /api/ai/tasks/tags`.
+    public func suggestTags(
+        for task: String,
+        existingTags: [String],
+        in language: LanguageCode? = nil
+    ) async throws -> [String] {
+        let response: TaskItemsResponse = try await postJSON(
+            path: ["api", "ai", "tasks", "tags"],
+            body: TaskTagSuggestionsRequest(
+                task: task,
+                existingTags: existingTags,
+                language: language
+            )
+        )
+        return response.items
+    }
+
     /// Calls `POST /api/ai/tasks/improve`.
     public func improveTask(
         _ task: String,

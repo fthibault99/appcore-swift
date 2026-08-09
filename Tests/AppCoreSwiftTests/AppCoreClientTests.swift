@@ -353,6 +353,38 @@ final class AppCoreClientTests: XCTestCase {
         _ = try await makeClient().generateSubtasks(for: "Ship the feature")
     }
 
+    func testSuggestTagsSendsExistingTagsAndReturnsTypedItems() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/ai/tasks/tags"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["task"] as? String, "Ship the release")
+            XCTAssertEqual(object["existingTags"] as? [String], ["#Work", "#Personal"])
+            XCTAssertEqual(object["language"] as? String, "en")
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: "{\"items\":[\"#Work\",\"#Release\",\"#Testing\",\"#Documentation\",\"#Planning\"]}"
+            )
+        }
+
+        let tags = try await makeClient().suggestTags(
+            for: "Ship the release",
+            existingTags: ["#Work", "#Personal"],
+            in: LanguageCode("en")!
+        )
+
+        XCTAssertEqual(tags, ["#Work", "#Release", "#Testing", "#Documentation", "#Planning"])
+    }
+
     func testImproveTaskReturnsOriginalAndImprovedText() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")

@@ -9,6 +9,19 @@ public struct TaskAIRequest: Codable, Equatable, Sendable {
     }
 }
 
+/// Body accepted by `POST /api/ai/tasks/tags`.
+public struct TaskTagSuggestionsRequest: Codable, Equatable, Sendable {
+    public let task: String
+    public let existingTags: [String]
+    public let language: LanguageCode?
+
+    public init(task: String, existingTags: [String], language: LanguageCode? = nil) {
+        self.task = task
+        self.existingTags = existingTags
+        self.language = language
+    }
+}
+
 /// Response returned by Task AI list-generation endpoints.
 public struct TaskItemsResponse: Codable, Equatable, Sendable {
     public let items: [String]
