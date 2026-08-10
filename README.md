@@ -215,6 +215,30 @@ print(translatedText)
 
 The request is sent to `POST /api/ai/texts/translate`. Text is limited to 20,000 characters by the AppCore server. The optional context is limited to 500 characters and helps resolve terminology, tone, or intended use. It is not translated or returned. Calls that do not need context can omit the argument.
 
+## Text correction and composition
+
+Correct a text while preserving its language, meaning, tone, and formatting:
+
+```swift
+let correctedText = try await client.correct(
+    "Je sui disponible mardi.",
+    context: "Professional email"
+)
+```
+
+Compose one email, message, publication, or letter from a business brief:
+
+```swift
+let email = try await client.compose(
+    "Ask Marie whether she is available for a project meeting on Tuesday afternoon.",
+    as: .email,
+    in: LanguageCode("fr")!,
+    context: "Friendly professional relationship."
+)
+```
+
+Composition types are `.email`, `.message`, `.publication`, and `.letter`. The server validates text lengths and owns the writing instructions, model, and provider configuration.
+
 ## Task AI
 
 Generate subtasks, risks, and assistant-ready questions for a task:

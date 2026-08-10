@@ -287,6 +287,101 @@ final class AppCoreClientTests: XCTestCase {
         XCTAssertEqual(translatedText, "Hello!")
     }
 
+    func testCorrectTextUsesExpectedBodyAndReturnsText() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/ai/texts/correct")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["text"] as? String, "Je sui disponible.")
+            XCTAssertEqual(object["context"] as? String, "Professional email")
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"text":"Je suis disponible."}"#
+            )
+        }
+
+        let correctedText = try await makeClient().correct(
+            "Je sui disponible.",
+            context: "Professional email"
+        )
+
+        XCTAssertEqual(correctedText, "Je suis disponible.")
+    }
+
+    func testCorrectTextOmitsContextWhenAbsent() async throws {
+        URLProtocolStub.requestHandler = { request in
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertNil(object["context"])
+
+            return Self.response(for: request, statusCode: 200, body: #"{"text":"Corrected"}"#)
+        }
+
+        let correctedText = try await makeClient().correct("Corected")
+
+        XCTAssertEqual(correctedText, "Corrected")
+    }
+
+    func testComposeTextUsesExpectedTypedBodyAndReturnsText() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/ai/texts/compose")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["type"] as? String, "EMAIL")
+            XCTAssertEqual(object["brief"] as? String, "Ask Marie for a meeting Tuesday")
+            XCTAssertEqual(object["targetLanguage"] as? String, "fr")
+            XCTAssertEqual(object["context"] as? String, "Friendly professional relationship")
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"text":"Bonjour Marie, serais-tu disponible mardi?"}"#
+            )
+        }
+
+        let composedText = try await makeClient().compose(
+            "Ask Marie for a meeting Tuesday",
+            as: .email,
+            in: LanguageCode("FR")!,
+            context: "Friendly professional relationship"
+        )
+
+        XCTAssertEqual(composedText, "Bonjour Marie, serais-tu disponible mardi?")
+    }
+
+    func testComposeTextPropagatesStructuredServerError() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(
+                for: request,
+                statusCode: 400,
+                body: #"{"timestamp":"2026-08-09T00:00:00Z","status":400,"error":"VALIDATION_ERROR","message":"The request contains invalid data","path":"/api/ai/texts/compose","details":["Brief is required"]}"#
+            )
+        }
+
+        do {
+            _ = try await makeClient().compose(
+                "",
+                as: .message,
+                in: LanguageCode("en")!
+            )
+            XCTFail("Expected a server error")
+        } catch let AppCoreClientError.server(statusCode, response) {
+            XCTAssertEqual(statusCode, 400)
+            XCTAssertEqual(response?.error, "VALIDATION_ERROR")
+            XCTAssertEqual(response?.details, ["Brief is required"])
+        }
+    }
+
     func testTaskListEndpointsUseAuthenticatedTypedRequests() async throws {
         let expectedPaths = ["subtasks", "risks", "questions"]
         var receivedPaths: [String] = []

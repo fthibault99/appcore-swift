@@ -161,6 +161,37 @@ public final class AppCoreClient: Sendable {
         return response.text
     }
 
+    /// Calls `POST /api/ai/texts/correct`.
+    public func correct(
+        _ text: String,
+        context: String? = nil
+    ) async throws -> String {
+        let response: GeneratedTextResponse = try await postJSON(
+            path: ["api", "ai", "texts", "correct"],
+            body: CorrectTextRequest(text: text, context: context)
+        )
+        return response.text
+    }
+
+    /// Calls `POST /api/ai/texts/compose`.
+    public func compose(
+        _ brief: String,
+        as type: TextCompositionType,
+        in targetLanguage: LanguageCode,
+        context: String? = nil
+    ) async throws -> String {
+        let response: GeneratedTextResponse = try await postJSON(
+            path: ["api", "ai", "texts", "compose"],
+            body: ComposeTextRequest(
+                type: type,
+                brief: brief,
+                targetLanguage: targetLanguage,
+                context: context
+            )
+        )
+        return response.text
+    }
+
     /// Calls `POST /api/ai/tasks/subtasks`.
     public func generateSubtasks(
         for task: String,
