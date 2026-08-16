@@ -110,7 +110,7 @@ public final class AppCoreClient: Sendable {
             "multipart/form-data; boundary=\(boundary)",
             forHTTPHeaderField: "Content-Type"
         )
-        request.httpBody = multipartImageBody(
+        request.httpBody = multipartBody(
             data: data,
             fileName: fileName,
             mediaType: mediaType.rawValue,
@@ -134,7 +134,7 @@ public final class AppCoreClient: Sendable {
             "multipart/form-data; boundary=\(boundary)",
             forHTTPHeaderField: "Content-Type"
         )
-        request.httpBody = multipartImageBody(
+        request.httpBody = multipartBody(
             data: data,
             fileName: fileName,
             mediaType: mediaType.rawValue,
@@ -142,6 +142,39 @@ public final class AppCoreClient: Sendable {
             boundary: boundary
         )
         return try await send(request)
+    }
+
+    /// Calls `POST /api/ai/audio/transcriptions` with multipart form data.
+    public func transcribeAudio(
+        _ data: Data,
+        fileName: String,
+        mediaType: AudioMediaType
+    ) async throws -> String {
+        let boundary = "AppCoreBoundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url(path: ["api", "ai", "audio", "transcriptions"]))
+        request.httpMethod = "POST"
+        request.setValue(
+            "multipart/form-data; boundary=\(boundary)",
+            forHTTPHeaderField: "Content-Type"
+        )
+        request.httpBody = multipartBody(
+            data: data,
+            fieldName: "file",
+            fileName: fileName,
+            mediaType: mediaType.rawValue,
+            fields: [:],
+            boundary: boundary
+        )
+        let response: AudioTranscriptionResponse = try await send(request)
+        return response.text
+    }
+
+    /// Calls `POST /api/ai/voice-inbox/organize`.
+    public func organizeVoiceInbox(_ text: String) async throws -> VoiceInbox {
+        try await postJSON(
+            path: ["api", "ai", "voice-inbox", "organize"],
+            body: OrganizeVoiceInboxRequest(text: text)
+        )
     }
 
     /// Calls `POST /api/ai/texts/translate`.
@@ -348,7 +381,7 @@ public final class AppCoreClient: Sendable {
             "multipart/form-data; boundary=\(boundary)",
             forHTTPHeaderField: "Content-Type"
         )
-        request.httpBody = multipartImageBody(
+        request.httpBody = multipartBody(
             data: data,
             fileName: fileName,
             mediaType: mediaType.rawValue,
@@ -502,8 +535,9 @@ public final class AppCoreClient: Sendable {
         }
     }
 
-    private func multipartImageBody(
+    private func multipartBody(
         data: Data,
+        fieldName: String = "image",
         fileName: String,
         mediaType: String,
         fields: [String: String],
@@ -516,7 +550,7 @@ public final class AppCoreClient: Sendable {
             body.append(Data("\(field.value)\r\n".utf8))
         }
         body.append(Data("--\(boundary)\r\n".utf8))
-        body.append(Data("Content-Disposition: form-data; name=\"image\"; filename=\"\(fileName)\"\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(fileName)\"\r\n".utf8))
         body.append(Data("Content-Type: \(mediaType)\r\n\r\n".utf8))
         body.append(data)
         body.append(Data("\r\n--\(boundary)--\r\n".utf8))

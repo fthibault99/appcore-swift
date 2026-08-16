@@ -381,6 +381,25 @@ let translatedRecipe = try await client.translate(
 
 `LanguageCode` accepts exactly two ASCII letters and normalizes them to lowercase. Examples include `en`, `fr`, `de`, and `it`.
 
+## Voice Inbox
+
+Transcribe browser or device audio, then organize the transcription with the server-owned Voice Inbox prompt and model:
+
+```swift
+let text = try await client.transcribeAudio(
+    audioData,
+    fileName: "voice.webm",
+    mediaType: .webM
+)
+
+let inbox = try await client.organizeVoiceInbox(text)
+print(inbox.title)
+print(inbox.summary)
+print(inbox.tasks)
+```
+
+The transcription request sends authenticated multipart form data using the backend field `file`. Supported `AudioMediaType` values mirror AppCore's accepted MIME types. The organization request sends only `{ "text": "..." }`; prompts, models, and provider parameters remain owned by AppCore.
+
 ### Extract grocery products from recipe ingredients
 
 ```swift

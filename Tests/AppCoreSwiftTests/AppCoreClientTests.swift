@@ -229,6 +229,58 @@ final class AppCoreClientTests: XCTestCase {
         XCTAssertNil(product.description)
     }
 
+    func testTranscribeAudioBuildsAuthenticatedMultipartFileRequest() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/ai/audio/transcriptions")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            let contentType = try XCTUnwrap(request.value(forHTTPHeaderField: "Content-Type"))
+            XCTAssertTrue(contentType.hasPrefix("multipart/form-data; boundary="))
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let bodyText = String(decoding: body, as: UTF8.self)
+            XCTAssertTrue(bodyText.contains("name=\"file\"; filename=\"voice.webm\""))
+            XCTAssertTrue(bodyText.contains("Content-Type: audio/webm"))
+            XCTAssertFalse(bodyText.contains("name=\"image\""))
+
+            return Self.response(for: request, statusCode: 200, body: #"{"text":"Appeler Marc demain."}"#)
+        }
+
+        let text = try await makeClient().transcribeAudio(
+            Data([0x1A, 0x45, 0xDF, 0xA3]),
+            fileName: "voice.webm",
+            mediaType: .webM
+        )
+
+        XCTAssertEqual(text, "Appeler Marc demain.")
+    }
+
+    func testOrganizeVoiceInboxSendsTextAndDecodesResponse() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/ai/voice-inbox/organize")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["text"] as? String, "Demain appeler Marc et finir AWS.")
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"title":"Tâches pour demain","summary":"Deux tâches.","tasks":["Appeler Marc","Terminer AWS"]}"#
+            )
+        }
+
+        let inbox = try await makeClient().organizeVoiceInbox("Demain appeler Marc et finir AWS.")
+
+        XCTAssertEqual(inbox.title, "Tâches pour demain")
+        XCTAssertEqual(inbox.summary, "Deux tâches.")
+        XCTAssertEqual(inbox.tasks, ["Appeler Marc", "Terminer AWS"])
+    }
+
     func testTranslateTextUsesExpectedBodyAndReturnsText() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
