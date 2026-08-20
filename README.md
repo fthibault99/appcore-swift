@@ -366,6 +366,41 @@ let recipe = try await client.extractRecipe(
 
 Supported image media types are `.jpeg`, `.png`, and `.webP`. AppCore applies its configured image size, format, and dimension limits.
 
+### Recreate a restaurant dish
+
+Dish recreation streams progress and returns a named collection of independently reusable recipe components:
+
+```swift
+let request = DishRecreationRequest(
+    dishName: "Poulet à l’origan",
+    restaurantName: "Au Vieux Duluth",
+    restaurantLocation: "Montréal",
+    description: "Servi avec pommes de terre, riz et salade",
+    servings: 4,
+    language: LanguageCode("fr"),
+    dishImage: DishRecreationImage(
+        data: dishImageData,
+        fileName: "dish.jpg",
+        mediaType: .jpeg
+    )
+)
+
+for try await event in client.recreateDish(request) {
+    switch event {
+    case .progress(let state):
+        print(state)
+    case .result(let result):
+        for component in result.recipes {
+            print(component.type, component.recipe.name)
+        }
+    case .failure(let failure):
+        print(failure.code, failure.message)
+    }
+}
+```
+
+The optional `dishImage` and `menuImage` use the backend multipart field names of the same name. Progress states mirror AppCore (`ANALYZING_IMAGE`, `SEARCHING_WEB`, and `GENERATING_RECIPE`). The terminal result groups `MAIN`, `SIDE`, `SAUCE`, `DESSERT`, or `OTHER` components under one reconstructed dish. AppCore owns web search, prompting, model selection, and recipe generation.
+
 ### Translate a recipe
 
 ```swift

@@ -650,6 +650,102 @@ final class AppCoreClientTests: XCTestCase {
         ])
     }
 
+    func testRecreateDishBuildsMultipartRequestAndYieldsTypedSSEEvents() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/ai/recipes/recreate-dish/stream")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/event-stream")
+            XCTAssertTrue(try XCTUnwrap(request.value(forHTTPHeaderField: "Content-Type"))
+                .hasPrefix("multipart/form-data; boundary="))
+
+            let body = String(decoding: try XCTUnwrap(Self.bodyData(from: request)), as: UTF8.self)
+            XCTAssertTrue(body.contains("name=\"dishName\"\r\n\r\nPoulet à l’origan"))
+            XCTAssertTrue(body.contains("name=\"restaurantName\"\r\n\r\nAu Vieux Duluth"))
+            XCTAssertTrue(body.contains("name=\"restaurantLocation\"\r\n\r\nMontréal"))
+            XCTAssertTrue(body.contains("name=\"description\"\r\n\r\nServi avec riz et salade"))
+            XCTAssertTrue(body.contains("name=\"servings\"\r\n\r\n4"))
+            XCTAssertTrue(body.contains("name=\"language\"\r\n\r\nfr"))
+            XCTAssertTrue(body.contains("name=\"dishImage\"; filename=\"dish.jpg\""))
+            XCTAssertTrue(body.contains("name=\"menuImage\"; filename=\"menu.png\""))
+            XCTAssertTrue(body.contains("Content-Type: image/jpeg"))
+            XCTAssertTrue(body.contains("Content-Type: image/png"))
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                event: progress
+                data: {"state":"ANALYZING_IMAGE"}
+
+                event: progress
+                data: {"state":"SEARCHING_WEB"}
+
+                event: result
+                data: {"name":"Repas complet","recipes":[{"type":"MAIN","recipe":\(Self.recipeJSON)}]}
+
+                """
+            )
+        }
+
+        let input = DishRecreationRequest(
+            dishName: "Poulet à l’origan",
+            restaurantName: "Au Vieux Duluth",
+            restaurantLocation: "Montréal",
+            description: "Servi avec riz et salade",
+            servings: 4,
+            language: LanguageCode("fr"),
+            dishImage: DishRecreationImage(
+                data: Data([0xFF, 0xD8, 0xFF]), fileName: "dish.jpg", mediaType: .jpeg
+            ),
+            menuImage: DishRecreationImage(
+                data: Data([0x89, 0x50, 0x4E, 0x47]), fileName: "menu.png", mediaType: .png
+            )
+        )
+
+        var events: [DishRecreationStreamEvent] = []
+        for try await event in makeClient().recreateDish(input) {
+            events.append(event)
+        }
+
+        XCTAssertEqual(events[0], .progress(.analyzingImage))
+        XCTAssertEqual(events[1], .progress(.searchingWeb))
+        guard case let .result(result) = events[2] else {
+            return XCTFail("Expected a dish recreation result")
+        }
+        XCTAssertEqual(result.name, "Repas complet")
+        XCTAssertEqual(result.recipes.first?.type, .main)
+        XCTAssertEqual(result.recipes.first?.recipe.name, "Toast")
+    }
+
+    func testRecreateDishYieldsTypedSSEFailure() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                event: error
+                data: {"code":"DISH_RECREATION_FAILED","message":"Unable to recreate the dish."}
+
+                """
+            )
+        }
+
+        var events: [DishRecreationStreamEvent] = []
+        for try await event in makeClient().recreateDish(
+            DishRecreationRequest(dishName: "Poke", description: "Salmon")
+        ) {
+            events.append(event)
+        }
+
+        XCTAssertEqual(events, [
+            .failure(DishRecreationFailure(
+                code: "DISH_RECREATION_FAILED",
+                message: "Unable to recreate the dish."
+            ))
+        ])
+    }
+
     func testDecodesAppCoreErrorResponse() async throws {
         URLProtocolStub.requestHandler = { request in
             Self.response(

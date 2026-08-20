@@ -391,6 +391,23 @@ public final class AppCoreClient: Sendable {
         return try await send(request)
     }
 
+    /// Streams `POST /api/ai/recipes/recreate-dish/stream` as server-sent events.
+    public func recreateDish(
+        _ input: DishRecreationRequest
+    ) -> AsyncThrowingStream<DishRecreationStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await consumeDishRecreationStream(input, continuation: continuation)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     /// Calls `POST /api/v1/analytics/events` and expects `202 Accepted`.
     public func trackAnalyticsEvent(_ event: AnalyticsEvent) async throws {
         var request = URLRequest(url: url(path: ["api", "v1", "analytics", "events"]))
@@ -507,6 +524,116 @@ public final class AppCoreClient: Sendable {
         }
     }
 
+    private func consumeDishRecreationStream(
+        _ input: DishRecreationRequest,
+        continuation: AsyncThrowingStream<DishRecreationStreamEvent, Error>.Continuation
+    ) async throws {
+        let boundary = "AppCoreBoundary-\(UUID().uuidString)"
+        var request = URLRequest(url: url(path: ["api", "ai", "recipes", "recreate-dish", "stream"]))
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue(apiKey, forHTTPHeaderField: Self.apiKeyHeader)
+
+        var fields = ["dishName": input.dishName]
+        if let value = input.restaurantName { fields["restaurantName"] = value }
+        if let value = input.restaurantLocation { fields["restaurantLocation"] = value }
+        if let value = input.description { fields["description"] = value }
+        if let value = input.servings { fields["servings"] = String(value) }
+        if let value = input.language { fields["language"] = value.rawValue }
+        var files: [MultipartFilePart] = []
+        if let image = input.dishImage {
+            files.append(MultipartFilePart(
+                fieldName: "dishImage", data: image.data, fileName: image.fileName,
+                mediaType: image.mediaType.rawValue
+            ))
+        }
+        if let image = input.menuImage {
+            files.append(MultipartFilePart(
+                fieldName: "menuImage", data: image.data, fileName: image.fileName,
+                mediaType: image.mediaType.rawValue
+            ))
+        }
+        request.httpBody = multipartBody(fields: fields, files: files, boundary: boundary)
+
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await session.bytes(for: request)
+        } catch let error as URLError {
+            throw AppCoreClientError.transport(error.code)
+        } catch {
+            throw AppCoreClientError.transport(.unknown)
+        }
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AppCoreClientError.invalidResponse
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            var body = Data()
+            for try await byte in bytes { body.append(byte) }
+            throw AppCoreClientError.server(
+                statusCode: httpResponse.statusCode,
+                response: try? JSONDecoder().decode(AppCoreAPIErrorResponse.self, from: body)
+            )
+        }
+
+        var frameBytes: [UInt8] = []
+        var terminalEventReceived = false
+        for try await byte in bytes {
+            frameBytes.append(byte)
+            let delimiterLength: Int?
+            if frameBytes.suffix(4).elementsEqual([13, 10, 13, 10]) {
+                delimiterLength = 4
+            } else if frameBytes.suffix(2).elementsEqual([10, 10]) {
+                delimiterLength = 2
+            } else {
+                delimiterLength = nil
+            }
+            if let delimiterLength {
+                let frame = String(decoding: frameBytes.dropLast(delimiterLength), as: UTF8.self)
+                if let event = try decodeDishRecreationStreamFrame(frame) {
+                    continuation.yield(event)
+                    if case .result = event { terminalEventReceived = true }
+                    if case .failure = event { terminalEventReceived = true }
+                }
+                frameBytes.removeAll(keepingCapacity: true)
+            }
+        }
+        if !frameBytes.isEmpty,
+           let event = try decodeDishRecreationStreamFrame(String(decoding: frameBytes, as: UTF8.self)) {
+            continuation.yield(event)
+            if case .result = event { terminalEventReceived = true }
+            if case .failure = event { terminalEventReceived = true }
+        }
+        if !terminalEventReceived {
+            throw AppCoreClientError.decoding("Dish recreation stream ended before a result or error event")
+        }
+    }
+
+    private func decodeDishRecreationStreamFrame(_ frame: String) throws -> DishRecreationStreamEvent? {
+        let lines = frame.split(whereSeparator: { $0.isNewline })
+        let name = lines.first(where: { $0.hasPrefix("event:") })
+            .map { String($0.dropFirst(6)).trimmingCharacters(in: .whitespaces) }
+        let dataLines = lines.filter { $0.hasPrefix("data:") }
+            .map { String($0.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+        guard let name, !dataLines.isEmpty else { return nil }
+        let data = Data(dataLines.joined(separator: "\n").utf8)
+        do {
+            switch name {
+            case "progress":
+                return .progress(try JSONDecoder().decode(DishRecreationProgress.self, from: data).state)
+            case "result":
+                return .result(try JSONDecoder().decode(DishRecreationResult.self, from: data))
+            case "error":
+                return .failure(try JSONDecoder().decode(DishRecreationFailure.self, from: data))
+            default:
+                return nil
+            }
+        } catch {
+            throw AppCoreClientError.decoding(String(describing: error))
+        }
+    }
+
     private func decodeChatStreamFrame(_ frame: String) throws -> ChatStreamEvent? {
         let lines = frame.split(whereSeparator: { $0.isNewline })
         let name = lines.first(where: { $0.hasPrefix("event:") })
@@ -557,6 +684,28 @@ public final class AppCoreClient: Sendable {
         return body
     }
 
+    private func multipartBody(
+        fields: [String: String],
+        files: [MultipartFilePart],
+        boundary: String
+    ) -> Data {
+        var body = Data()
+        for field in fields.sorted(by: { $0.key < $1.key }) {
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(Data("Content-Disposition: form-data; name=\"\(field.key)\"\r\n\r\n".utf8))
+            body.append(Data("\(field.value)\r\n".utf8))
+        }
+        for file in files {
+            body.append(Data("--\(boundary)\r\n".utf8))
+            body.append(Data("Content-Disposition: form-data; name=\"\(file.fieldName)\"; filename=\"\(file.fileName)\"\r\n".utf8))
+            body.append(Data("Content-Type: \(file.mediaType)\r\n\r\n".utf8))
+            body.append(file.data)
+            body.append(Data("\r\n".utf8))
+        }
+        body.append(Data("--\(boundary)--\r\n".utf8))
+        return body
+    }
+
     private func send<Response: Decodable>(
         _ request: URLRequest
     ) async throws -> Response {
@@ -599,4 +748,11 @@ public final class AppCoreClient: Sendable {
 
         return data
     }
+}
+
+private struct MultipartFilePart {
+    let fieldName: String
+    let data: Data
+    let fileName: String
+    let mediaType: String
 }
