@@ -305,6 +305,39 @@ Only `.user` and `.assistant` roles are available to clients. AppCore owns the p
 
 ## Recipes
 
+### Discover real web recipes from inventory
+
+```swift
+let request = RecipeDiscoveryRequest(
+    locale: "fr-CA",
+    priorityProductIds: ["chicken", "broccoli"],
+    comment: "Des pâtes rapides pour quatre personnes",
+    inventory: [
+        InventoryRecipeProduct(id: "chicken", name: "Poitrine de poulet", quantity: 2, unit: "unité"),
+        InventoryRecipeProduct(id: "broccoli", name: "Brocoli", quantity: 1, unit: "unité"),
+        InventoryRecipeProduct(id: "pasta", name: "Pâtes", quantity: 500, unit: "g")
+    ]
+)
+
+for try await event in client.streamRecipeDiscovery(request) {
+    switch event {
+    case .progress(let state):
+        print(state.rawValue)
+    case .result(let result):
+        for recipe in result.recipes {
+            print(recipe.title, recipe.sourceURL, recipe.imageURL)
+        }
+    case .failure(let failure):
+        print(failure.message)
+    }
+}
+```
+
+Use `try await client.discoverRecipes(request)` when progress events are not needed. AppCore selects at most 40
+inventory candidates locally, searches real recipe pages in the requested locale language, and returns at most five
+results with required source and image URLs. Full recipe extraction remains a separate call to
+`extractRecipe(fromURL:)` after the user selects a result.
+
 ### Extract a recipe from text
 
 ```swift

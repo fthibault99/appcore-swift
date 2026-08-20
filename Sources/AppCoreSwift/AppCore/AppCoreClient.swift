@@ -368,6 +368,33 @@ public final class AppCoreClient: Sendable {
         return response.ingredients
     }
 
+    /// Calls `POST /api/ai/recipes/discover-from-inventory`.
+    public func discoverRecipes(
+        _ request: RecipeDiscoveryRequest
+    ) async throws -> RecipeDiscoveryResult {
+        try await postJSON(
+            path: ["api", "ai", "recipes", "discover-from-inventory"],
+            body: request
+        )
+    }
+
+    /// Streams `POST /api/ai/recipes/discover-from-inventory/stream` as server-sent events.
+    public func streamRecipeDiscovery(
+        _ request: RecipeDiscoveryRequest
+    ) -> AsyncThrowingStream<RecipeDiscoveryStreamEvent, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    try await consumeRecipeDiscoveryStream(request, continuation: continuation)
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     /// Calls `POST /api/ai/recipes/from-image` with multipart form data.
     public func extractRecipe(
         fromImage data: Data,
@@ -607,6 +634,107 @@ public final class AppCoreClient: Sendable {
         }
         if !terminalEventReceived {
             throw AppCoreClientError.decoding("Dish recreation stream ended before a result or error event")
+        }
+    }
+
+    private func consumeRecipeDiscoveryStream(
+        _ input: RecipeDiscoveryRequest,
+        continuation: AsyncThrowingStream<RecipeDiscoveryStreamEvent, Error>.Continuation
+    ) async throws {
+        var request = URLRequest(url: url(path: [
+            "api", "ai", "recipes", "discover-from-inventory", "stream"
+        ]))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue(apiKey, forHTTPHeaderField: Self.apiKeyHeader)
+        do {
+            request.httpBody = try JSONEncoder().encode(input)
+        } catch {
+            throw AppCoreClientError.encoding(String(describing: error))
+        }
+
+        let bytes: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (bytes, response) = try await session.bytes(for: request)
+        } catch let error as URLError {
+            throw AppCoreClientError.transport(error.code)
+        } catch {
+            throw AppCoreClientError.transport(.unknown)
+        }
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AppCoreClientError.invalidResponse
+        }
+        guard (200...299).contains(httpResponse.statusCode) else {
+            var body = Data()
+            for try await byte in bytes { body.append(byte) }
+            throw AppCoreClientError.server(
+                statusCode: httpResponse.statusCode,
+                response: try? JSONDecoder().decode(AppCoreAPIErrorResponse.self, from: body)
+            )
+        }
+
+        var frameBytes: [UInt8] = []
+        var terminalEventReceived = false
+        for try await byte in bytes {
+            frameBytes.append(byte)
+            let delimiterLength: Int?
+            if frameBytes.suffix(4).elementsEqual([13, 10, 13, 10]) {
+                delimiterLength = 4
+            } else if frameBytes.suffix(2).elementsEqual([10, 10]) {
+                delimiterLength = 2
+            } else {
+                delimiterLength = nil
+            }
+            if let delimiterLength {
+                let frame = String(decoding: frameBytes.dropLast(delimiterLength), as: UTF8.self)
+                if let event = try decodeRecipeDiscoveryStreamFrame(frame) {
+                    continuation.yield(event)
+                    if case .result = event { terminalEventReceived = true }
+                    if case .failure = event { terminalEventReceived = true }
+                }
+                frameBytes.removeAll(keepingCapacity: true)
+            }
+        }
+        if !frameBytes.isEmpty,
+           let event = try decodeRecipeDiscoveryStreamFrame(String(decoding: frameBytes, as: UTF8.self)) {
+            continuation.yield(event)
+            if case .result = event { terminalEventReceived = true }
+            if case .failure = event { terminalEventReceived = true }
+        }
+        if !terminalEventReceived {
+            throw AppCoreClientError.decoding(
+                "Recipe discovery stream ended before a result or error event"
+            )
+        }
+    }
+
+    private func decodeRecipeDiscoveryStreamFrame(
+        _ frame: String
+    ) throws -> RecipeDiscoveryStreamEvent? {
+        let lines = frame.split(whereSeparator: { $0.isNewline })
+        let name = lines.first(where: { $0.hasPrefix("event:") })
+            .map { String($0.dropFirst(6)).trimmingCharacters(in: .whitespaces) }
+        let dataLines = lines.filter { $0.hasPrefix("data:") }
+            .map { String($0.dropFirst(5)).trimmingCharacters(in: .whitespaces) }
+        guard let name, !dataLines.isEmpty else { return nil }
+        let data = Data(dataLines.joined(separator: "\n").utf8)
+        do {
+            switch name {
+            case "progress":
+                return .progress(try JSONDecoder().decode(
+                    RecipeDiscoveryProgress.self, from: data
+                ).state)
+            case "result":
+                return .result(try JSONDecoder().decode(RecipeDiscoveryResult.self, from: data))
+            case "error":
+                return .failure(try JSONDecoder().decode(RecipeDiscoveryFailure.self, from: data))
+            default:
+                return nil
+            }
+        } catch {
+            throw AppCoreClientError.decoding(String(describing: error))
         }
     }
 

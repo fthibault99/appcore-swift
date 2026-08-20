@@ -650,6 +650,91 @@ final class AppCoreClientTests: XCTestCase {
         ])
     }
 
+    func testDiscoverRecipesUsesAuthenticatedJSONEndpoint() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString,
+                           "https://appcore.example/api/ai/recipes/discover-from-inventory")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["locale"] as? String, "fr-CA")
+            XCTAssertEqual(object["priorityProductIds"] as? [String], ["product-1"])
+            XCTAssertEqual((object["inventory"] as? [[String: Any]])?.first?["name"] as? String, "Poulet")
+            return Self.response(for: request, statusCode: 200, body: Self.recipeDiscoveryJSON)
+        }
+
+        let result = try await makeClient().discoverRecipes(Self.recipeDiscoveryRequest)
+
+        XCTAssertEqual(result.recipes.first?.title, "Pâtes au poulet")
+        XCTAssertEqual(result.recipes.first?.sourceURL.host, "recipes.example")
+        XCTAssertEqual(result.recipes.first?.imageURL.host, "images.example")
+    }
+
+    func testStreamRecipeDiscoveryYieldsTypedSSEEvents() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString,
+                           "https://appcore.example/api/ai/recipes/discover-from-inventory/stream")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "text/event-stream")
+            return Self.response(for: request, statusCode: 200, body: """
+                event: progress\r
+                data: {"state":"SELECTING_PRODUCTS"}\r
+                \r
+                event: progress
+                data: {"state":"SEARCHING_WEB"}
+
+                event: progress
+                data: {"state":"GENERATING_RESULTS"}
+
+                event: progress
+                data: {"state":"RESOLVING_IMAGES"}
+
+                event: result
+                data: \(Self.recipeDiscoveryJSON)
+
+                """)
+        }
+
+        var events: [RecipeDiscoveryStreamEvent] = []
+        for try await event in makeClient().streamRecipeDiscovery(Self.recipeDiscoveryRequest) {
+            events.append(event)
+        }
+
+        XCTAssertEqual(events[0], .progress(.selectingProducts))
+        XCTAssertEqual(events[1], .progress(.searchingWeb))
+        XCTAssertEqual(events[2], .progress(.generatingResults))
+        XCTAssertEqual(events[3], .progress(.resolvingImages))
+        guard case let .result(result) = events[4] else {
+            return XCTFail("Expected a recipe discovery result")
+        }
+        XCTAssertEqual(result.recipes.first?.matchedProducts, ["Poulet", "Pâtes"])
+    }
+
+    func testStreamRecipeDiscoveryYieldsTypedFailure() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(for: request, statusCode: 200, body: """
+                event: error
+                data: {"code":"RECIPE_DISCOVERY_FAILED","message":"Unable to discover recipes."}
+
+                """)
+        }
+
+        var events: [RecipeDiscoveryStreamEvent] = []
+        for try await event in makeClient().streamRecipeDiscovery(Self.recipeDiscoveryRequest) {
+            events.append(event)
+        }
+
+        XCTAssertEqual(events, [.failure(RecipeDiscoveryFailure(
+            code: "RECIPE_DISCOVERY_FAILED",
+            message: "Unable to discover recipes."
+        ))])
+    }
+
     func testRecreateDishBuildsMultipartRequestAndYieldsTypedSSEEvents() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
@@ -962,6 +1047,18 @@ final class AppCoreClientTests: XCTestCase {
     }
 
     private static let recipeJSON = #"{"url":null,"name":"Toast","image":null,"author":null,"datePublished":null,"description":null,"prepTime":null,"cookTime":null,"totalTime":null,"keywords":null,"recipeIngredient":["bread"],"recipeInstructions":["Toast bread."],"recipeYield":null}"#
+
+    private static let recipeDiscoveryJSON = #"{"recipes":[{"id":"recipe-1","title":"Pâtes au poulet","sourceName":"Cuisine","sourceUrl":"https://recipes.example/pasta","imageUrl":"https://images.example/pasta.jpg","language":"fr","matchedProducts":["Poulet","Pâtes"]}]}"#
+
+    private static let recipeDiscoveryRequest = RecipeDiscoveryRequest(
+        locale: "fr-CA",
+        priorityProductIds: ["product-1"],
+        comment: "Rapide",
+        inventory: [
+            InventoryRecipeProduct(id: "product-1", name: "Poulet", quantity: 2, unit: "unité"),
+            InventoryRecipeProduct(id: "product-2", name: "Pâtes", quantity: 500, unit: "g"),
+        ]
+    )
 
     private static func bodyData(from request: URLRequest) -> Data? {
         if let body = request.httpBody {
