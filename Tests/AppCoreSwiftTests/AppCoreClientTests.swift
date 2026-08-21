@@ -715,6 +715,37 @@ final class AppCoreClientTests: XCTestCase {
         XCTAssertEqual(result.recipes.first?.matchedProducts, ["Poulet", "Pâtes"])
     }
 
+    func testStreamRecipeDiscoveryAcceptsCurrentProgressStates() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(for: request, statusCode: 200, body: """
+                event: progress
+                data: {"state":"ANALYZING_INVENTORY"}
+
+                event: progress
+                data: {"state":"SEARCHING_WEB"}
+
+                event: progress
+                data: {"state":"RANKING_RECIPES"}
+
+                event: result
+                data: \(Self.recipeDiscoveryJSON)
+
+                """)
+        }
+
+        var events: [RecipeDiscoveryStreamEvent] = []
+        for try await event in makeClient().streamRecipeDiscovery(Self.recipeDiscoveryRequest) {
+            events.append(event)
+        }
+
+        XCTAssertEqual(events[0], .progress(.analyzingInventory))
+        XCTAssertEqual(events[1], .progress(.searchingWeb))
+        XCTAssertEqual(events[2], .progress(.rankingRecipes))
+        guard case .result = events[3] else {
+            return XCTFail("Expected a recipe discovery result")
+        }
+    }
+
     func testStreamRecipeDiscoveryYieldsTypedFailure() async throws {
         URLProtocolStub.requestHandler = { request in
             Self.response(for: request, statusCode: 200, body: """

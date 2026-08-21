@@ -87,6 +87,8 @@ public struct RecipeDiscoveryResult: Codable, Equatable, Sendable {
 }
 
 public enum RecipeDiscoveryState: String, Codable, Equatable, Sendable {
+    case analyzingInventory = "ANALYZING_INVENTORY"
+    case rankingRecipes = "RANKING_RECIPES"
     case selectingProducts = "SELECTING_PRODUCTS"
     case searchingWeb = "SEARCHING_WEB"
     case generatingResults = "GENERATING_RESULTS"
