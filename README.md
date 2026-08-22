@@ -360,6 +360,22 @@ print(recipe.recipeInstructions)
 
 ### Extract a recipe from a URL
 
+Before choosing the URL extraction path, clients can retrieve AppCore's current client-download domains:
+
+```swift
+let extractionDomains = try await client.recipeExtractionDomains()
+let host = recipeURL.host?.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+let shouldDownloadOnDevice = host.map { host in
+    extractionDomains.contains { domain in
+        host == domain || host.hasSuffix(".\(domain)")
+    }
+} ?? false
+```
+
+The call uses `GET /api/ai/recipes/extraction-domains` with the configured API key. Returned domains are normalized
+and sorted by AppCore. Clients should compare URL hosts, not use substring matching. When a domain matches, download
+the page on-device and submit its content with `extractRecipe(fromWebContent:sourceURL:contentType:)`.
+
 ```swift
 let recipeURL = URL(string: "https://example.com/recipe")!
 let recipe = try await client.extractRecipe(fromURL: recipeURL)

@@ -32,6 +32,10 @@ public struct ExtractRecipeFromURLRequest: Codable, Equatable, Sendable {
     }
 }
 
+struct RecipeExtractionDomainsResponse: Codable, Equatable, Sendable {
+    let domains: [String]
+}
+
 public enum WebRecipeContentType: String, Codable, Sendable {
     case text = "TEXT"
     case jsonLD = "JSON_LD"

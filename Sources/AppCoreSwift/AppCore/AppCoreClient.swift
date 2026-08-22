@@ -333,6 +333,17 @@ public final class AppCoreClient: Sendable {
         )
     }
 
+    /// Calls `GET /api/ai/recipes/extraction-domains`.
+    ///
+    /// The returned normalized domains identify recipe pages whose HTML should
+    /// be downloaded by the client and submitted through `extractRecipe(fromWebContent:sourceURL:contentType:)`.
+    public func recipeExtractionDomains() async throws -> [String] {
+        let response: RecipeExtractionDomainsResponse = try await send(
+            URLRequest(url: url(path: ["api", "ai", "recipes", "extraction-domains"]))
+        )
+        return response.domains
+    }
+
     /// Calls `POST /api/ai/recipes/extract-from-url`.
     public func extractRecipe(fromURL url: URL) async throws -> Recipe {
         try await postJSON(

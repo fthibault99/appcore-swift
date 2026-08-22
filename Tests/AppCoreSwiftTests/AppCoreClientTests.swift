@@ -907,6 +907,31 @@ final class AppCoreClientTests: XCTestCase {
         XCTAssertEqual(recipe.name, "Toast")
     }
 
+    func testRecipeExtractionDomainsUsesAuthenticatedGetAndReturnsDomains() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/ai/recipes/extraction-domains"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"domains":["5ingredients15minutes.com","recettes.qc.ca","zeste.ca"]}"#
+            )
+        }
+
+        let domains = try await makeClient().recipeExtractionDomains()
+
+        XCTAssertEqual(
+            domains,
+            ["5ingredients15minutes.com", "recettes.qc.ca", "zeste.ca"]
+        )
+    }
+
     func testTranslateRecipeUsesLanguageCodeAndRecipeWrapper() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/ai/recipes/translate")
