@@ -5,7 +5,7 @@ import XCTest
 final class BarcodeModelsTests: XCTestCase {
     func testDecodesBarcodeProductUsingAppCoreFieldNames() throws {
         let data = Data(
-            #"{"barcode":"0057000613280","productName":"Classic Bricks","description":"Creative brick box","brand":"LEGO","imageUrl":"https://example.com/image.jpg"}"#.utf8
+            #"{"barcode":"0057000613280","productName":"Classic Bricks","description":"Creative brick box","brand":"LEGO","imageUrl":"https://example.com/image.jpg","legoSetNumber":"4637-1"}"#.utf8
         )
 
         let product = try JSONDecoder().decode(BarcodeProduct.self, from: data)
@@ -15,6 +15,7 @@ final class BarcodeModelsTests: XCTestCase {
         XCTAssertEqual(product.description, "Creative brick box")
         XCTAssertEqual(product.brand, "LEGO")
         XCTAssertEqual(product.imageUrl, "https://example.com/image.jpg")
+        XCTAssertEqual(product.legoSetNumber, "4637-1")
     }
 
     func testDecodesNullableProductFields() throws {
