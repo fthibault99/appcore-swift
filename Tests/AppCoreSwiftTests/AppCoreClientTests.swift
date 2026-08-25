@@ -90,6 +90,101 @@ final class AppCoreClientTests: XCTestCase {
         )
     }
 
+    func testBricksetSetReadsRawJSONByCompleteNumberAndBarcode() async throws {
+        var requestedURLs: [String] = []
+        URLProtocolStub.requestHandler = { request in
+            requestedURLs.append(try XCTUnwrap(request.url?.absoluteString))
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"status":"success","sets":[{"number":"75313","futureBricksetField":{"foo":"bar"}}]}"#
+            )
+        }
+
+        let byNumber = try await makeClient().bricksetSet("75313-1")
+        let byBarcode = try await makeClient().bricksetSet(barcode: "5702016913866")
+
+        XCTAssertEqual(requestedURLs, [
+            "https://appcore.example/api/lego/brickset/sets/75313-1",
+            "https://appcore.example/api/lego/brickset/barcodes/5702016913866",
+        ])
+        let expected: BricksetJSON = [
+            "status": "success",
+            "sets": [[
+                "number": "75313",
+                "futureBricksetField": ["foo": "bar"],
+            ]],
+        ]
+        XCTAssertEqual(byNumber, expected)
+        XCTAssertEqual(byBarcode, expected)
+    }
+
+    func testCacheBricksetSetPutsCompleteRawJSON() async throws {
+        let response: BricksetJSON = [
+            "status": "success",
+            "matches": 1,
+            "sets": [[
+                "setID": 31235,
+                "number": "75313",
+                "numberVariant": 1,
+                "futureBricksetField": ["foo": "bar"],
+            ]],
+        ]
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/lego/brickset/sets")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            XCTAssertEqual(try JSONDecoder().decode(BricksetJSON.self, from: body), response)
+            return Self.response(for: request, statusCode: 204, body: "")
+        }
+
+        try await makeClient().cacheBricksetSet(response)
+    }
+
+    func testBricksetAdditionalImagesReadsAndWritesRawJSON() async throws {
+        let response: BricksetJSON = [
+            "status": "success",
+            "matches": 1,
+            "additionalImages": [[
+                "thumbnailURL": "https://images.example/thumbnail.jpg",
+                "imageURL": "https://images.example/image.jpg",
+                "futureImageField": true,
+            ]],
+        ]
+        var requestCount = 0
+        URLProtocolStub.requestHandler = { request in
+            requestCount += 1
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/lego/brickset/sets/75313-1/images"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            if request.httpMethod == "GET" {
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: String(decoding: try JSONEncoder().encode(response), as: UTF8.self)
+                )
+            }
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            XCTAssertEqual(try JSONDecoder().decode(BricksetJSON.self, from: body), response)
+            return Self.response(for: request, statusCode: 204, body: "")
+        }
+
+        let cached = try await makeClient().bricksetAdditionalImages(for: "75313-1")
+        try await makeClient().cacheBricksetAdditionalImages(response, for: "75313-1")
+
+        XCTAssertEqual(cached, response)
+        XCTAssertEqual(requestCount, 2)
+    }
+
     func testDescribeWineUsesExpectedBodyAndReturnsSwiftContract() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")

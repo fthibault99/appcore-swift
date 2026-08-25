@@ -85,6 +85,52 @@ public final class AppCoreClient: Sendable {
         return response.description
     }
 
+    /// Calls `GET /api/lego/brickset/sets/{setNumber}`.
+    ///
+    /// Pass either a complete Brickset number such as `75313-1` or a set number
+    /// such as `75313`, for which AppCore uses variant 1.
+    public func bricksetSet(_ setNumber: String) async throws -> BricksetJSON {
+        try await send(
+            URLRequest(url: url(path: ["api", "lego", "brickset", "sets", setNumber]))
+        )
+    }
+
+    /// Calls `PUT /api/lego/brickset/sets` with the complete `getSets` response.
+    public func cacheBricksetSet(_ response: BricksetJSON) async throws {
+        try await putJSON(
+            path: ["api", "lego", "brickset", "sets"],
+            body: response
+        )
+    }
+
+    /// Calls `GET /api/lego/brickset/barcodes/{barcode}`.
+    public func bricksetSet(barcode: String) async throws -> BricksetJSON {
+        try await send(
+            URLRequest(url: url(path: ["api", "lego", "brickset", "barcodes", barcode]))
+        )
+    }
+
+    /// Calls `GET /api/lego/brickset/sets/{setNumber}/images`.
+    public func bricksetAdditionalImages(for setNumber: String) async throws -> BricksetJSON {
+        try await send(
+            URLRequest(
+                url: url(path: ["api", "lego", "brickset", "sets", setNumber, "images"])
+            )
+        )
+    }
+
+    /// Calls `PUT /api/lego/brickset/sets/{setNumber}/images` with the complete
+    /// `getAdditionalImages` response.
+    public func cacheBricksetAdditionalImages(
+        _ response: BricksetJSON,
+        for setNumber: String
+    ) async throws {
+        try await putJSON(
+            path: ["api", "lego", "brickset", "sets", setNumber, "images"],
+            body: response
+        )
+    }
+
     /// Calls `POST /api/ai/wines/describe`.
     public func describeWine(
         named name: String,
@@ -478,6 +524,23 @@ public final class AppCoreClient: Sendable {
         }
 
         return try await send(request)
+    }
+
+    private func putJSON<Body: Encodable>(
+        path: [String],
+        body: Body
+    ) async throws {
+        var request = URLRequest(url: url(path: path))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONEncoder().encode(body)
+        } catch {
+            throw AppCoreClientError.encoding(String(describing: error))
+        }
+
+        _ = try await perform(request)
     }
 
     private func taskItems(

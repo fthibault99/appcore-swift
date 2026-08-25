@@ -6,6 +6,7 @@ The package currently supports:
 
 - barcode product lookup and translation;
 - short LEGO set description generation;
+- raw Brickset set and additional-image caching;
 - localized wine and spirits description;
 - plain-text translation;
 - recipe extraction and translation;
@@ -117,6 +118,36 @@ let description = try await client.describeBrickSet(
 ```
 
 AppCore owns the OpenAI prompt, model, output limits, and API key. The Swift client sends only the set code, set name, requested language, and its AppCore API key.
+
+## Brickset cache
+
+Read the raw `getSets` response cached by AppCore using either a complete set number or a barcode:
+
+```swift
+let cachedSet = try await client.bricksetSet("75313-1")
+let cachedByBarcode = try await client.bricksetSet(barcode: "5702016913866")
+```
+
+On a cache miss, call Brickset in the application and use its response immediately, then asynchronously send the
+complete response to AppCore without rebuilding or filtering its JSON:
+
+```swift
+try await client.cacheBricksetSet(bricksetGetSetsResponse)
+```
+
+Additional images use a separate raw JSON document:
+
+```swift
+let images = try await client.bricksetAdditionalImages(for: "75313-1")
+try await client.cacheBricksetAdditionalImages(
+    bricksetAdditionalImagesResponse,
+    for: "75313-1"
+)
+```
+
+`BricksetJSON` is an alias of `JSONValue`, preserving unknown fields, nested objects, arrays, strings, numbers,
+booleans, and null values. These methods call only the public API-key-protected `/api/lego/brickset/**` routes;
+the Swift package exposes no `/api/admin/brickset/**` operation.
 
 ## Wine and spirits descriptions
 
