@@ -512,12 +512,14 @@ let translatedRecipe = try await client.translate(
 ```swift
 let mealTypes = try await client.classifyMealTypes(
     for: recipe,
-    availableMealTypes: ["Déjeuner", "Dîner", "Souper", "Collation", "Dessert"]
+    availableMealTypes: ["Déjeuner", "Dîner", "Souper", "Collation", "Dessert"],
+    locale: "fr-CA"
 )
 
 let tags = try await client.classifyTags(
     for: recipe,
-    existingTags: ["Rapide", "Végétarien", "Familial"]
+    existingTags: ["Rapide", "Végétarien", "Familial"],
+    locale: "fr-CA"
 )
 
 print(mealTypes)

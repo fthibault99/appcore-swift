@@ -1154,6 +1154,7 @@ final class AppCoreClientTests: XCTestCase {
             let body = try XCTUnwrap(Self.bodyData(from: request))
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(object["mealTypes"] as? [String], ["Déjeuner", "Dîner", "Souper"])
+            XCTAssertEqual(object["locale"] as? String, "fr-CA")
             let recipe = try XCTUnwrap(object["recipe"] as? [String: Any])
             XCTAssertEqual(recipe["name"] as? String, "Toast")
 
@@ -1170,7 +1171,8 @@ final class AppCoreClientTests: XCTestCase {
                 recipeIngredient: ["bread"],
                 recipeInstructions: ["Toast bread."]
             ),
-            availableMealTypes: ["Déjeuner", "Dîner", "Souper"]
+            availableMealTypes: ["Déjeuner", "Dîner", "Souper"],
+            locale: "fr-CA"
         )
 
         XCTAssertEqual(mealTypes, ["Dîner", "Souper"])
@@ -1189,6 +1191,7 @@ final class AppCoreClientTests: XCTestCase {
             let body = try XCTUnwrap(Self.bodyData(from: request))
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
             XCTAssertEqual(object["tags"] as? [String], ["Rapide", "Familial"])
+            XCTAssertEqual(object["locale"] as? String, "fr-FR")
             let recipe = try XCTUnwrap(object["recipe"] as? [String: Any])
             XCTAssertEqual(recipe["recipeIngredient"] as? [String], ["bread"])
 
@@ -1205,7 +1208,8 @@ final class AppCoreClientTests: XCTestCase {
                 recipeIngredient: ["bread"],
                 recipeInstructions: ["Toast bread."]
             ),
-            existingTags: ["Rapide", "Familial"]
+            existingTags: ["Rapide", "Familial"],
+            locale: "fr-FR"
         )
 
         XCTAssertEqual(result.matchingTags, ["Rapide"])
