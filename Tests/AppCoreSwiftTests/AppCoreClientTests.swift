@@ -185,6 +185,45 @@ final class AppCoreClientTests: XCTestCase {
         XCTAssertEqual(requestCount, 2)
     }
 
+    func testBricksetInstructionsReadsAndWritesCompleteRawJSON() async throws {
+        let response: BricksetJSON = [
+            "status": "success",
+            "matches": 48,
+            "instructions": [[
+                "URL": "https://www.lego.com/cdn/product-assets/product.bi.core.pdf/6342704.pdf",
+                "description": "BI 3104, 88+4, 10276 1/4 V29",
+                "futureInstructionField": ["preserved": true],
+            ]],
+        ]
+        var requestCount = 0
+        URLProtocolStub.requestHandler = { request in
+            requestCount += 1
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/lego/brickset/sets/10276-1/instructions"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            if request.httpMethod == "GET" {
+                return Self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: String(decoding: try JSONEncoder().encode(response), as: UTF8.self)
+                )
+            }
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            XCTAssertEqual(try JSONDecoder().decode(BricksetJSON.self, from: body), response)
+            return Self.response(for: request, statusCode: 204, body: "")
+        }
+
+        let cached = try await makeClient().bricksetInstructions(for: "10276-1")
+        try await makeClient().cacheBricksetInstructions(response, for: "10276-1")
+
+        XCTAssertEqual(cached, response)
+        XCTAssertEqual(requestCount, 2)
+    }
+
     func testDescribeWineUsesExpectedBodyAndReturnsSwiftContract() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")

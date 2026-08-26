@@ -131,6 +131,27 @@ public final class AppCoreClient: Sendable {
         )
     }
 
+    /// Calls `GET /api/lego/brickset/sets/{setNumber}/instructions`.
+    public func bricksetInstructions(for setNumber: String) async throws -> BricksetJSON {
+        try await send(
+            URLRequest(
+                url: url(path: ["api", "lego", "brickset", "sets", setNumber, "instructions"])
+            )
+        )
+    }
+
+    /// Calls `PUT /api/lego/brickset/sets/{setNumber}/instructions` with the
+    /// complete `getInstructions2` response.
+    public func cacheBricksetInstructions(
+        _ response: BricksetJSON,
+        for setNumber: String
+    ) async throws {
+        try await putJSON(
+            path: ["api", "lego", "brickset", "sets", setNumber, "instructions"],
+            body: response
+        )
+    }
+
     /// Calls `POST /api/ai/wines/describe`.
     public func describeWine(
         named name: String,

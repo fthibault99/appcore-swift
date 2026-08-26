@@ -6,7 +6,7 @@ The package currently supports:
 
 - barcode product lookup and translation;
 - short LEGO set description generation;
-- raw Brickset set and additional-image caching;
+- raw Brickset set, additional-image, and instruction caching;
 - localized wine and spirits description;
 - plain-text translation;
 - recipe extraction and translation;
@@ -142,6 +142,16 @@ let images = try await client.bricksetAdditionalImages(for: "75313-1")
 try await client.cacheBricksetAdditionalImages(
     bricksetAdditionalImagesResponse,
     for: "75313-1"
+)
+```
+
+Building instructions use the complete raw `getInstructions2` response in another separate document:
+
+```swift
+let instructions = try await client.bricksetInstructions(for: "10276-1")
+try await client.cacheBricksetInstructions(
+    bricksetInstructionsResponse,
+    for: "10276-1"
 )
 ```
 
