@@ -39,4 +39,15 @@ final class RecipeModelsTests: XCTestCase {
         XCTAssertEqual(WebRecipeContentType.text.rawValue, "TEXT")
         XCTAssertEqual(WebRecipeContentType.jsonLD.rawValue, "JSON_LD")
     }
+
+    func testDecodesRecipeTagClassificationResponse() throws {
+        let data = Data(
+            #"{"matchingTags":["Rapide","Familial"],"suggestedTags":["Tout-en-un"]}"#.utf8
+        )
+
+        let response = try JSONDecoder().decode(RecipeTagClassificationResponse.self, from: data)
+
+        XCTAssertEqual(response.matchingTags, ["Rapide", "Familial"])
+        XCTAssertEqual(response.suggestedTags, ["Tout-en-un"])
+    }
 }

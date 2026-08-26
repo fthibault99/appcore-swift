@@ -446,6 +446,31 @@ public final class AppCoreClient: Sendable {
         return response.ingredients
     }
 
+    /// Calls `POST /api/ai/recipes/classify-meal-types`.
+    /// Every returned value is an exact member of `availableMealTypes`.
+    public func classifyMealTypes(
+        for recipe: Recipe,
+        availableMealTypes: [String]
+    ) async throws -> [String] {
+        let response: MealTypeClassificationResponse = try await postJSON(
+            path: ["api", "ai", "recipes", "classify-meal-types"],
+            body: ClassifyRecipeMealTypesRequest(recipe: recipe, mealTypes: availableMealTypes)
+        )
+        return response.mealTypes
+    }
+
+    /// Calls `POST /api/ai/recipes/classify-tags`.
+    /// `suggestedTags` contains at most three optional new tags proposed by AppCore.
+    public func classifyTags(
+        for recipe: Recipe,
+        existingTags: [String]
+    ) async throws -> RecipeTagClassificationResponse {
+        try await postJSON(
+            path: ["api", "ai", "recipes", "classify-tags"],
+            body: ClassifyRecipeTagsRequest(recipe: recipe, tags: existingTags)
+        )
+    }
+
     /// Calls `POST /api/ai/recipes/discover-from-inventory`.
     public func discoverRecipes(
         _ request: RecipeDiscoveryRequest

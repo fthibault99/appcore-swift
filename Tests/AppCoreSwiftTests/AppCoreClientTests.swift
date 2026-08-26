@@ -1141,6 +1141,77 @@ final class AppCoreClientTests: XCTestCase {
         )
     }
 
+    func testClassifyMealTypesUsesAuthenticatedEndpointAndReturnsExactValues() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/ai/recipes/classify-meal-types"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["mealTypes"] as? [String], ["Déjeuner", "Dîner", "Souper"])
+            let recipe = try XCTUnwrap(object["recipe"] as? [String: Any])
+            XCTAssertEqual(recipe["name"] as? String, "Toast")
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"mealTypes":["Dîner","Souper"]}"#
+            )
+        }
+
+        let mealTypes = try await makeClient().classifyMealTypes(
+            for: Recipe(
+                name: "Toast",
+                recipeIngredient: ["bread"],
+                recipeInstructions: ["Toast bread."]
+            ),
+            availableMealTypes: ["Déjeuner", "Dîner", "Souper"]
+        )
+
+        XCTAssertEqual(mealTypes, ["Dîner", "Souper"])
+    }
+
+    func testClassifyTagsUsesAuthenticatedEndpointAndDecodesBothTagGroups() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/ai/recipes/classify-tags"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["tags"] as? [String], ["Rapide", "Familial"])
+            let recipe = try XCTUnwrap(object["recipe"] as? [String: Any])
+            XCTAssertEqual(recipe["recipeIngredient"] as? [String], ["bread"])
+
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"matchingTags":["Rapide"],"suggestedTags":["Tout-en-un"]}"#
+            )
+        }
+
+        let result = try await makeClient().classifyTags(
+            for: Recipe(
+                name: "Toast",
+                recipeIngredient: ["bread"],
+                recipeInstructions: ["Toast bread."]
+            ),
+            existingTags: ["Rapide", "Familial"]
+        )
+
+        XCTAssertEqual(result.matchingTags, ["Rapide"])
+        XCTAssertEqual(result.suggestedTags, ["Tout-en-un"])
+    }
+
     func testExtractRecipeFromImageBuildsMultipartImagePart() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/ai/recipes/from-image")

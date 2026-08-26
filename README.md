@@ -11,6 +11,7 @@ The package currently supports:
 - plain-text translation;
 - recipe extraction and translation;
 - recipe product extraction;
+- recipe meal-type and tag classification;
 - analytics event collection;
 - AppCore API error decoding.
 
@@ -505,6 +506,27 @@ let translatedRecipe = try await client.translate(
 ```
 
 `LanguageCode` accepts exactly two ASCII letters and normalizes them to lowercase. Examples include `en`, `fr`, `de`, and `it`.
+
+### Classify a recipe
+
+```swift
+let mealTypes = try await client.classifyMealTypes(
+    for: recipe,
+    availableMealTypes: ["Déjeuner", "Dîner", "Souper", "Collation", "Dessert"]
+)
+
+let tags = try await client.classifyTags(
+    for: recipe,
+    existingTags: ["Rapide", "Végétarien", "Familial"]
+)
+
+print(mealTypes)
+print(tags.matchingTags)
+print(tags.suggestedTags)
+```
+
+Meal types and `matchingTags` are exact values from the arrays supplied by the client. `suggestedTags` contains at
+most three optional new tags. AppCore owns the prompts and OpenAI configuration and does not persist suggestions.
 
 ## Voice Inbox
 
