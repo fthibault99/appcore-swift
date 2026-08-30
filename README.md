@@ -12,6 +12,7 @@ The package currently supports:
 - recipe extraction and translation;
 - recipe product extraction;
 - recipe meal-type and tag classification;
+- MealAgain recreation balances, verified purchases, and credit consumption;
 - analytics event collection;
 - AppCore API error decoding.
 
@@ -561,6 +562,48 @@ for result in ingredientProducts {
     print(result.products)
 }
 ```
+
+## MealAgain recreation credits
+
+The public MealAgain API uses the same `AppCoreClient` and `X-API-Key` authentication.
+Keep the user's UUID stable across calls; creating a new UUID creates a different account.
+
+```swift
+let initialStatus = try await client.createMealAgainUserIfNeeded(userId: userId)
+let status = try await client.mealAgainRecreationStatus(userId: userId)
+// status.totalRemaining is nil for Lifetime; use unlimited and canRecreate.
+
+let purchase = MealAgainPurchaseRequest(
+    transactionId: transactionId,
+    productId: productId,
+    signedTransactionInfo: signedTransactionInfo
+)
+let credited = try await client.grantMealAgainPurchasedCredits(purchase, for: userId)
+
+// Only after successful recreation. Persist this ID and reuse it on retries.
+let consumption = try await client.consumeMealAgainRecreation(
+    userId: userId,
+    recreationId: recreationId
+)
+```
+
+- Creation is idempotent and sends no body. Status reads do not create missing users.
+- Purchase proof must be the Apple-signed transaction JWS, with StoreKit `appAccountToken` equal to
+  `userId`. The server owns product quantities, purchase dates, and Apple environment configuration.
+  The request intentionally has no `credits`, `purchasedAt`, or environment field. No StoreKit dependency
+  is added to this package; the application supplies the signed proof.
+- A repeated purchase returns `credited == false`, `alreadyProcessed == true`, and zero `creditsGranted`.
+- Consumption reports `.free`, `.purchased`, or `.lifetime`. Replaying the same recreation ID returns
+  `consumed == false` and `alreadyProcessed == true`, with the original source and current balances.
+  Omitting `recreationId` sends `{}` and makes every call a separate, non-idempotent consumption.
+- Errors use `AppCoreClientError.server`, with backend codes in `response?.error`, including
+  `NO_RECREATION_CREDITS`, `USER_NOT_FOUND`, `INVALID_PURCHASE`, and `PURCHASE_CONFLICT`.
+
+The package does not automatically charge `recreateDish` or any generation stream. A status check is
+not a reservation, and generation failures must not consume credits. The existing API key identifies
+an application, not an individual user; per-user authorization is a separate backend concern.
+Admin free-credit grants, Lifetime updates, and histories remain outside this public client because
+those routes require an administrator session and CSRF protection.
 
 ## Analytics events
 

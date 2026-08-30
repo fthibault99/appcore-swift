@@ -1287,6 +1287,132 @@ final class AppCoreClientTests: XCTestCase {
         try await makeClient().trackAnalyticsEvent(event)
     }
 
+    func testMealAgainCreationUsesBodylessPostAndDecodesInitialBalance() async throws {
+        let userId = UUID()
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/mealagain/users/\(userId.uuidString)")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            XCTAssertNil(Self.bodyData(from: request))
+            return Self.response(for: request, statusCode: 200, body: """
+                {"userId":"\(userId)","lifetimeAccess":false,"freeRemaining":3,"purchasedRemaining":0,"totalRemaining":3,"unlimited":false,"canRecreate":true}
+                """)
+        }
+        let result = try await makeClient().createMealAgainUserIfNeeded(userId: userId)
+        XCTAssertEqual(result, MealAgainRecreationStatusResponse(userId: userId, lifetimeAccess: false,
+            freeRemaining: 3, purchasedRemaining: 0, totalRemaining: 3, unlimited: false, canRecreate: true))
+    }
+
+    func testMealAgainStatusDecodesLifetimeAndLargeTotals() async throws {
+        let userId = UUID()
+        for lifetime in [false, true] {
+            URLProtocolStub.requestHandler = { request in
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(request.url?.path, "/api/mealagain/users/\(userId.uuidString)/recreations")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+                XCTAssertNil(Self.bodyData(from: request))
+                return Self.response(for: request, statusCode: 200, body: """
+                    {"userId":"\(userId)","lifetimeAccess":\(lifetime),"freeRemaining":2147483647,"purchasedRemaining":2147483647,"totalRemaining":\(lifetime ? "null" : "4294967294"),"unlimited":\(lifetime),"canRecreate":true}
+                    """)
+            }
+            let result = try await makeClient().mealAgainRecreationStatus(userId: userId)
+            XCTAssertEqual(result.userId, userId)
+            XCTAssertEqual(result.totalRemaining, lifetime ? nil : 4_294_967_294)
+            XCTAssertEqual(result.unlimited, lifetime)
+            XCTAssertTrue(result.canRecreate)
+        }
+    }
+
+    func testMealAgainPurchaseSendsOnlySignedProofAndDecodesReplay() async throws {
+        let userId = UUID()
+        let purchase = MealAgainPurchaseRequest(transactionId: "2000000123456789",
+            productId: "com.fstt.MealAgain.taste", signedTransactionInfo: "test.signed.proof")
+        for replay in [false, true] {
+            URLProtocolStub.requestHandler = { request in
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.url?.path, "/api/mealagain/users/\(userId.uuidString)/purchases")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+                let data = try XCTUnwrap(Self.bodyData(from: request))
+                XCTAssertEqual(try JSONDecoder().decode(MealAgainPurchaseRequest.self, from: data), purchase)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                XCTAssertEqual(Set(object.keys), ["transactionId", "productId", "signedTransactionInfo"])
+                return Self.response(for: request, statusCode: 200, body: """
+                    {"credited":\(!replay),"alreadyProcessed":\(replay),"creditsGranted":\(replay ? 0 : 10),"freeRemaining":2,"purchasedRemaining":10}
+                    """)
+            }
+            let result = try await makeClient().grantMealAgainPurchasedCredits(purchase, for: userId)
+            XCTAssertEqual(result.credited, !replay)
+            XCTAssertEqual(result.alreadyProcessed, replay)
+            XCTAssertEqual(result.creditsGranted, replay ? 0 : 10)
+            XCTAssertEqual(result.purchasedRemaining, 10)
+        }
+    }
+
+    func testMealAgainConsumptionPreservesIdAndDecodesEverySourceAndReplay() async throws {
+        let userId = UUID()
+        let recreationId = UUID()
+        for source in [MealAgainCreditSource.free, .purchased, .lifetime] {
+            for replay in [false, true] {
+                URLProtocolStub.requestHandler = { request in
+                    XCTAssertEqual(request.httpMethod, "POST")
+                    XCTAssertEqual(request.url?.path, "/api/mealagain/users/\(userId.uuidString)/recreations/consume")
+                    XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+                    XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+                    let data = try XCTUnwrap(Self.bodyData(from: request))
+                    XCTAssertEqual(try JSONDecoder().decode(MealAgainConsumeRecreationRequest.self, from: data).recreationId, recreationId)
+                    return Self.response(for: request, statusCode: 200, body: """
+                        {"consumed":\(!replay),"alreadyProcessed":\(replay),"creditSource":"\(source.rawValue)","freeRemaining":1,"purchasedRemaining":10,"unlimited":\(source == .lifetime)}
+                        """)
+                }
+                let result = try await makeClient().consumeMealAgainRecreation(userId: userId, recreationId: recreationId)
+                XCTAssertEqual(result.creditSource, source)
+                XCTAssertEqual(result.consumed, !replay)
+                XCTAssertEqual(result.alreadyProcessed, replay)
+                XCTAssertEqual(result.unlimited, source == .lifetime)
+            }
+        }
+    }
+
+    func testMealAgainConsumptionWithoutIdSendsEmptyObject() async throws {
+        URLProtocolStub.requestHandler = { request in
+            let data = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertTrue(object.isEmpty)
+            return Self.response(for: request, statusCode: 200, body: #"{"consumed":true,"alreadyProcessed":false,"creditSource":"FREE","freeRemaining":0,"purchasedRemaining":0,"unlimited":false}"#)
+        }
+        let result = try await makeClient().consumeMealAgainRecreation(userId: UUID())
+        XCTAssertTrue(result.consumed)
+    }
+
+    func testMealAgainPropagatesStructuredBusinessErrors() async throws {
+        for (status, code) in [(409, "NO_RECREATION_CREDITS"), (404, "USER_NOT_FOUND"), (400, "INVALID_PURCHASE"), (409, "PURCHASE_CONFLICT")] {
+            URLProtocolStub.requestHandler = { request in
+                Self.response(for: request, statusCode: status, body: """
+                    {"timestamp":"2026-08-30T20:00:00Z","status":\(status),"error":"\(code)","message":"MealAgain error","path":"/api/mealagain/users/test","details":[]}
+                    """)
+            }
+            do {
+                _ = try await makeClient().consumeMealAgainRecreation(userId: UUID(), recreationId: UUID())
+                XCTFail("Expected a structured server error")
+            } catch let AppCoreClientError.server(statusCode, response) {
+                XCTAssertEqual(statusCode, status)
+                XCTAssertEqual(response?.error, code)
+            }
+        }
+    }
+
+    func testMealAgainRejectsUnknownCreditSource() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(for: request, statusCode: 200, body: #"{"consumed":true,"alreadyProcessed":false,"creditSource":"UNKNOWN","freeRemaining":0,"purchasedRemaining":0,"unlimited":false}"#)
+        }
+        do {
+            _ = try await makeClient().consumeMealAgainRecreation(userId: UUID())
+            XCTFail("Expected decoding error")
+        } catch AppCoreClientError.decoding { }
+    }
+
     private func makeClient() -> AppCoreClient {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [URLProtocolStub.self]

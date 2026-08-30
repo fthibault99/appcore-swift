@@ -24,6 +24,50 @@ public final class AppCoreClient: Sendable {
         self.session = session
     }
 
+    /// Creates the MealAgain account and initial balance if absent.
+    /// Calls `POST /api/mealagain/users/{userId}` without a body.
+    public func createMealAgainUserIfNeeded(
+        userId: UUID
+    ) async throws -> MealAgainRecreationStatusResponse {
+        var request = URLRequest(url: url(path: ["api", "mealagain", "users", userId.uuidString]))
+        request.httpMethod = "POST"
+        return try await send(request)
+    }
+
+    /// Reads the current balance without creating an account.
+    /// Calls `GET /api/mealagain/users/{userId}/recreations`.
+    public func mealAgainRecreationStatus(
+        userId: UUID
+    ) async throws -> MealAgainRecreationStatusResponse {
+        try await send(URLRequest(url: url(path: ["api", "mealagain", "users", userId.uuidString, "recreations"])))
+    }
+
+    /// Submits Apple-signed proof; AppCore determines the credit count and purchase date.
+    /// The purchase's StoreKit appAccountToken must equal userId.
+    /// Calls `POST /api/mealagain/users/{userId}/purchases`.
+    public func grantMealAgainPurchasedCredits(
+        _ purchase: MealAgainPurchaseRequest,
+        for userId: UUID
+    ) async throws -> MealAgainPurchaseResponse {
+        try await postJSON(
+            path: ["api", "mealagain", "users", userId.uuidString, "purchases"],
+            body: purchase
+        )
+    }
+
+    /// Records a successfully completed recreation. Never call at generation start.
+    /// Reuse the same recreationId on retries; omitting it makes each call a separate debit.
+    /// Calls `POST /api/mealagain/users/{userId}/recreations/consume`.
+    public func consumeMealAgainRecreation(
+        userId: UUID,
+        recreationId: UUID? = nil
+    ) async throws -> MealAgainConsumeRecreationResponse {
+        try await postJSON(
+            path: ["api", "mealagain", "users", userId.uuidString, "recreations", "consume"],
+            body: MealAgainConsumeRecreationRequest(recreationId: recreationId)
+        )
+    }
+
     /// Calls `GET /api/{domain}/barcodes/{barcode}`.
     public func barcode(
         _ barcode: String,
