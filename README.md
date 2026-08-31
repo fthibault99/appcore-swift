@@ -592,6 +592,11 @@ let consumption = try await client.consumeMealAgainRecreation(
   `userId`. The server owns product quantities, purchase dates, and Apple environment configuration.
   The request intentionally has no `credits`, `purchasedAt`, or environment field. No StoreKit dependency
   is added to this package; the application supplies the signed proof.
+- A verified revoked Feast transaction can be delivered to the same purchase endpoint to withdraw its
+  Lifetime entitlement. Always refresh status after delivery; `credited` acknowledges processing, not entitlement.
+- `removeAbsentLocalMealAgainLifetime(userId:)` is for deletion of Xcode test transactions only. It sends a
+  bodyless POST to `/api/mealagain/users/{userId}/local-storekit/lifetime-absent`. The server rejects it unless
+  explicit loopback-only local StoreKit mode is enabled. It never removes manual or Apple-purchased access.
 - A repeated purchase returns `credited == false`, `alreadyProcessed == true`, and zero `creditsGranted`.
 - Consumption reports `.free`, `.purchased`, or `.lifetime`. Replaying the same recreation ID returns
   `consumed == false` and `alreadyProcessed == true`, with the original source and current balances.

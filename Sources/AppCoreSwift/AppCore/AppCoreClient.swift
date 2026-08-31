@@ -77,6 +77,41 @@ public final class AppCoreClient: Sendable {
         )
     }
 
+    /// Creates only the balance belonging to the verified environment (V2).
+    public func createMealAgainUserIfNeeded(
+        userId: UUID, context: MealAgainEnvironmentContext
+    ) async throws -> MealAgainRecreationStatusResponse {
+        try await postJSON(path: ["api", "mealagain", "v2", "users", userId.uuidString], body: context)
+    }
+
+    /// Uses POST so the Apple proof is never placed in a URL or HTTP header.
+    public func mealAgainRecreationStatus(
+        userId: UUID, context: MealAgainEnvironmentContext
+    ) async throws -> MealAgainRecreationStatusResponse {
+        try await postJSON(path: ["api", "mealagain", "v2", "users", userId.uuidString, "recreations"], body: context)
+    }
+
+    public func grantMealAgainPurchasedCredits(
+        _ purchase: MealAgainPurchaseRequest, for userId: UUID, context: MealAgainEnvironmentContext
+    ) async throws -> MealAgainPurchaseResponse {
+        try await postJSON(path: ["api", "mealagain", "v2", "users", userId.uuidString, "purchases"],
+                           body: MealAgainScopedPurchaseRequest(context: context, purchase: purchase))
+    }
+
+    public func consumeMealAgainRecreation(
+        userId: UUID, recreationId: UUID?, balanceVersion: Int64, context: MealAgainEnvironmentContext
+    ) async throws -> MealAgainConsumeRecreationResponse {
+        try await postJSON(path: ["api", "mealagain", "v2", "users", userId.uuidString, "recreations", "consume"],
+                           body: MealAgainScopedConsumeRequest(context: context, recreationId: recreationId, balanceVersion: balanceVersion))
+    }
+
+    public func removeAbsentLocalMealAgainLifetime(
+        userId: UUID, context: MealAgainEnvironmentContext
+    ) async throws -> MealAgainRecreationStatusResponse {
+        try await postJSON(path: ["api", "mealagain", "v2", "users", userId.uuidString, "local-storekit", "lifetime-absent"],
+                           body: context)
+    }
+
     /// Calls `GET /api/{domain}/barcodes/{barcode}`.
     public func barcode(
         _ barcode: String,

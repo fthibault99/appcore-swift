@@ -14,6 +14,7 @@ public struct MealAgainRecreationStatusResponse: Codable, Equatable, Sendable {
     public let totalRemaining: Int64?
     public let unlimited: Bool
     public let canRecreate: Bool
+    public let balanceVersion: Int64?
 
     public init(
         userId: UUID,
@@ -22,7 +23,8 @@ public struct MealAgainRecreationStatusResponse: Codable, Equatable, Sendable {
         purchasedRemaining: Int,
         totalRemaining: Int64?,
         unlimited: Bool,
-        canRecreate: Bool
+        canRecreate: Bool,
+        balanceVersion: Int64? = nil
     ) {
         self.userId = userId
         self.lifetimeAccess = lifetimeAccess
@@ -31,6 +33,7 @@ public struct MealAgainRecreationStatusResponse: Codable, Equatable, Sendable {
         self.totalRemaining = totalRemaining
         self.unlimited = unlimited
         self.canRecreate = canRecreate
+        self.balanceVersion = balanceVersion
     }
 }
 
@@ -105,4 +108,33 @@ public struct MealAgainConsumeRecreationResponse: Codable, Equatable, Sendable {
         self.purchasedRemaining = purchasedRemaining
         self.unlimited = unlimited
     }
+}
+
+/// App Store environment, distinct from the AppCore host and CloudKit environment.
+public enum MealAgainEnvironment: String, Codable, Equatable, Sendable {
+    case sandbox = "SANDBOX"
+    case production = "PRODUCTION"
+}
+
+/// The environment is a hint; AppCore verifies the Apple-signed app transaction before trusting it.
+/// Never persist or log this proof. Xcode proofs work only with the explicit local server mode.
+public struct MealAgainEnvironmentContext: Codable, Equatable, Sendable {
+    public let environment: MealAgainEnvironment
+    public let signedAppTransaction: String
+
+    public init(environment: MealAgainEnvironment, signedAppTransaction: String) {
+        self.environment = environment
+        self.signedAppTransaction = signedAppTransaction
+    }
+}
+
+struct MealAgainScopedPurchaseRequest: Encodable {
+    let context: MealAgainEnvironmentContext
+    let purchase: MealAgainPurchaseRequest
+}
+
+struct MealAgainScopedConsumeRequest: Encodable {
+    let context: MealAgainEnvironmentContext
+    let recreationId: UUID?
+    let balanceVersion: Int64
 }

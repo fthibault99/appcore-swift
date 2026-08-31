@@ -1287,6 +1287,22 @@ final class AppCoreClientTests: XCTestCase {
         try await makeClient().trackAnalyticsEvent(event)
     }
 
+    func testLocalLifetimeRemovalUsesAuthenticatedBodylessPost() async throws {
+        let userId = UUID()
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/api/mealagain/users/\(userId.uuidString)/local-storekit/lifetime-absent")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertNil(Self.bodyData(from: request))
+            return Self.response(for: request, statusCode: 200, body: """
+                {"userId":"\(userId)","lifetimeAccess":false,"freeRemaining":3,"purchasedRemaining":0,"totalRemaining":3,"unlimited":false,"canRecreate":true}
+                """)
+        }
+        let result = try await makeClient().removeAbsentLocalMealAgainLifetime(userId: userId)
+        XCTAssertFalse(result.unlimited)
+        XCTAssertEqual(result.totalRemaining, 3)
+    }
+
     func testMealAgainCreationUsesBodylessPostAndDecodesInitialBalance() async throws {
         let userId = UUID()
         URLProtocolStub.requestHandler = { request in
@@ -1411,6 +1427,68 @@ final class AppCoreClientTests: XCTestCase {
             _ = try await makeClient().consumeMealAgainRecreation(userId: UUID())
             XCTFail("Expected decoding error")
         } catch AppCoreClientError.decoding { }
+    }
+
+    func testMealAgainV2CarriesVerifiedContextInBodiesForBothEnvironments() async throws {
+        let userId = UUID()
+        let recreationId = UUID()
+        for environment in [MealAgainEnvironment.sandbox, .production] {
+            let context = MealAgainEnvironmentContext(environment: environment, signedAppTransaction: "signed.app.proof")
+            var paths: [String] = []
+            URLProtocolStub.requestHandler = { request in
+                let path = try XCTUnwrap(request.url?.path)
+                paths.append(path)
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+                XCTAssertNil(request.url?.query)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(Self.bodyData(from: request))) as? [String: Any])
+                let proof = object["context"] as? [String: Any] ?? object
+                XCTAssertEqual(proof["environment"] as? String, environment.rawValue)
+                XCTAssertEqual(proof["signedAppTransaction"] as? String, "signed.app.proof")
+                if path.hasSuffix("/purchases") {
+                    let purchase = try XCTUnwrap(object["purchase"] as? [String: Any])
+                    XCTAssertEqual(purchase["signedTransactionInfo"] as? String, "signed.purchase.proof")
+                    XCTAssertNil(purchase["credits"])
+                    return Self.response(for: request, statusCode: 200, body: #"{"credited":true,"alreadyProcessed":false,"creditsGranted":10,"freeRemaining":3,"purchasedRemaining":10}"#)
+                }
+                if path.hasSuffix("/consume") {
+                    XCTAssertEqual(object["recreationId"] as? String, recreationId.uuidString)
+                    XCTAssertEqual(object["balanceVersion"] as? Int, 2)
+                    return Self.response(for: request, statusCode: 200, body: #"{"consumed":true,"alreadyProcessed":false,"creditSource":"FREE","freeRemaining":2,"purchasedRemaining":0,"unlimited":false}"#)
+                }
+                return Self.response(for: request, statusCode: 200,
+                    body: "{\"userId\":\"\(userId)\",\"lifetimeAccess\":false,\"freeRemaining\":3,\"purchasedRemaining\":0,\"totalRemaining\":3,\"unlimited\":false,\"canRecreate\":true,\"balanceVersion\":2}")
+            }
+            let client = makeClient()
+            let initial = try await client.createMealAgainUserIfNeeded(userId: userId, context: context)
+            XCTAssertEqual(initial.balanceVersion, 2)
+            _ = try await client.mealAgainRecreationStatus(userId: userId, context: context)
+            _ = try await client.grantMealAgainPurchasedCredits(.init(transactionId: "123", productId: "taste", signedTransactionInfo: "signed.purchase.proof"), for: userId, context: context)
+            _ = try await client.consumeMealAgainRecreation(userId: userId, recreationId: recreationId, balanceVersion: 2, context: context)
+            _ = try await client.removeAbsentLocalMealAgainLifetime(userId: userId, context: context)
+            let prefix = "/api/mealagain/v2/users/\(userId)"
+            XCTAssertEqual(paths, [prefix, prefix + "/recreations", prefix + "/purchases", prefix + "/recreations/consume", prefix + "/local-storekit/lifetime-absent"])
+        }
+    }
+
+    func testMealAgainV2RejectsEnvironmentProofAndResetWithoutFallback() async throws {
+        for code in ["INVALID_ENVIRONMENT_PROOF", "BALANCE_RESET", "ENVIRONMENT_REQUIRED"] {
+            var requests = 0
+            URLProtocolStub.requestHandler = { request in
+                requests += 1
+                return Self.response(for: request, statusCode: 403,
+                    body: "{\"timestamp\":\"\",\"status\":403,\"error\":\"\(code)\",\"message\":\"Rejected\",\"path\":\"/api/mealagain/v2\",\"details\":[]}")
+            }
+            do {
+                _ = try await makeClient().consumeMealAgainRecreation(userId: UUID(), recreationId: UUID(), balanceVersion: 0,
+                    context: .init(environment: .sandbox, signedAppTransaction: "invalid"))
+                XCTFail("Expected rejection")
+            } catch AppCoreClientError.server(_, let response) {
+                XCTAssertEqual(response?.error, code)
+            }
+            XCTAssertEqual(requests, 1)
+        }
     }
 
     private func makeClient() -> AppCoreClient {
