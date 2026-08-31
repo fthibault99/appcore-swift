@@ -55,6 +55,15 @@ public final class AppCoreClient: Sendable {
         )
     }
 
+    /// Test-only reconciliation after a complete Xcode StoreKit deletion.
+    /// Rejected unless AppCore explicitly enables its loopback-only local StoreKit mode.
+    public func removeAbsentLocalMealAgainLifetime(userId: UUID) async throws -> MealAgainRecreationStatusResponse {
+        var request = URLRequest(url: url(path: ["api", "mealagain", "users", userId.uuidString,
+                                               "local-storekit", "lifetime-absent"]))
+        request.httpMethod = "POST"
+        return try await send(request)
+    }
+
     /// Records a successfully completed recreation. Never call at generation start.
     /// Reuse the same recreationId on retries; omitting it makes each call a separate debit.
     /// Calls `POST /api/mealagain/users/{userId}/recreations/consume`.
