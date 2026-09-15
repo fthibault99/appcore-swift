@@ -7,6 +7,7 @@ The package currently supports:
 - barcode product lookup and translation;
 - short LEGO set description generation;
 - raw Brickset set, additional-image, and instruction caching;
+- Brick Collector shared albums;
 - localized wine and spirits description;
 - plain-text translation;
 - recipe extraction and translation;
@@ -160,6 +161,42 @@ try await client.cacheBricksetInstructions(
 `BricksetJSON` is an alias of `JSONValue`, preserving unknown fields, nested objects, arrays, strings, numbers,
 booleans, and null values. These methods call only the public API-key-protected `/api/lego/brickset/**` routes;
 the Swift package exposes no `/api/admin/brickset/**` operation.
+
+## Brick Collector shared albums
+
+Create an album from its name and ordered set references. Save both returned tokens securely; AppCore returns the
+management token only at creation:
+
+```swift
+let created = try await client.createSharedAlbum(
+    name: "My collection",
+    items: [
+        SharedAlbumItem(setNumber: "75355-1", sortOrder: 0),
+        SharedAlbumItem(setNumber: "10300-1", sortOrder: 1),
+    ]
+)
+```
+
+The read token can be shared. It permits only retrieval:
+
+```swift
+let album = try await client.sharedAlbum(readToken: created.readToken)
+```
+
+Keep the management token private. It replaces the complete album or removes the share:
+
+```swift
+let updated = try await client.updateSharedAlbum(
+    manageToken: created.manageToken,
+    name: "My collection",
+    items: [SharedAlbumItem(setNumber: "42171-1", sortOrder: 0)]
+)
+
+try await client.deleteSharedAlbum(manageToken: created.manageToken)
+```
+
+The album payload contains only its name, `updatedAt`, set numbers, and sort order. All four operations also use the
+client's existing AppCore `X-API-Key`; album tokens are capability tokens and do not replace API-key authentication.
 
 ## Wine and spirits descriptions
 

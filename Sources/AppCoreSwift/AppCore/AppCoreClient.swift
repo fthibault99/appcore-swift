@@ -240,6 +240,49 @@ public final class AppCoreClient: Sendable {
         )
     }
 
+    /// Creates a Brick Collector shared album and returns its owner tokens once.
+    /// Calls `POST /api/brick-collector/shared-albums`.
+    public func createSharedAlbum(
+        name: String,
+        items: [SharedAlbumItem]
+    ) async throws -> CreateSharedAlbumResponse {
+        try await postJSON(
+            path: ["api", "brick-collector", "shared-albums"],
+            body: SharedAlbumRequest(name: name, items: items)
+        )
+    }
+
+    /// Reads a shared album with its read-only capability token.
+    /// Calls `GET /api/brick-collector/shared-albums/{readToken}`.
+    public func sharedAlbum(readToken: UUID) async throws -> SharedAlbum {
+        try await send(URLRequest(url: url(path: [
+            "api", "brick-collector", "shared-albums", readToken.uuidString,
+        ])))
+    }
+
+    /// Replaces a shared album's complete state with its management capability token.
+    /// Calls `PUT /api/brick-collector/shared-albums/{manageToken}`.
+    public func updateSharedAlbum(
+        manageToken: UUID,
+        name: String,
+        items: [SharedAlbumItem]
+    ) async throws -> SharedAlbum {
+        try await putJSON(
+            path: ["api", "brick-collector", "shared-albums", manageToken.uuidString],
+            body: SharedAlbumRequest(name: name, items: items)
+        )
+    }
+
+    /// Deletes a shared album with its management capability token.
+    /// Calls `DELETE /api/brick-collector/shared-albums/{manageToken}`.
+    public func deleteSharedAlbum(manageToken: UUID) async throws {
+        var request = URLRequest(url: url(path: [
+            "api", "brick-collector", "shared-albums", manageToken.uuidString,
+        ]))
+        request.httpMethod = "DELETE"
+        _ = try await perform(request)
+    }
+
     /// Calls `POST /api/ai/wines/describe`.
     public func describeWine(
         named name: String,
@@ -677,6 +720,23 @@ public final class AppCoreClient: Sendable {
         }
 
         _ = try await perform(request)
+    }
+
+    private func putJSON<Body: Encodable, Response: Decodable>(
+        path: [String],
+        body: Body
+    ) async throws -> Response {
+        var request = URLRequest(url: url(path: path))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        do {
+            request.httpBody = try JSONEncoder().encode(body)
+        } catch {
+            throw AppCoreClientError.encoding(String(describing: error))
+        }
+
+        return try await send(request)
     }
 
     private func taskItems(

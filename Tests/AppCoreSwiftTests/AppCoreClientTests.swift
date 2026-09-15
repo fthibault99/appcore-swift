@@ -224,6 +224,116 @@ final class AppCoreClientTests: XCTestCase {
         XCTAssertEqual(requestCount, 2)
     }
 
+    func testCreateSharedAlbumPostsTypedPayloadAndReturnsOwnerTokens() async throws {
+        let id = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
+        let readToken = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
+        let manageToken = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
+        let items = [
+            SharedAlbumItem(setNumber: "75355-1", sortOrder: 0),
+            SharedAlbumItem(setNumber: "10300-1", sortOrder: 1),
+        ]
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/brick-collector/shared-albums"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["name"] as? String, "My collection")
+            let encodedItems = try XCTUnwrap(object["items"] as? [[String: Any]])
+            XCTAssertEqual(encodedItems[0]["setNumber"] as? String, "75355-1")
+            XCTAssertEqual(encodedItems[0]["sortOrder"] as? Int, 0)
+            return Self.response(
+                for: request,
+                statusCode: 201,
+                body: """
+                {"id":"\(id.uuidString)","name":"My collection",\
+                "readToken":"\(readToken.uuidString)","manageToken":"\(manageToken.uuidString)",\
+                "updatedAt":"2026-09-14T17:00:00Z"}
+                """
+            )
+        }
+
+        let response = try await makeClient().createSharedAlbum(name: "My collection", items: items)
+
+        XCTAssertEqual(response.id, id)
+        XCTAssertEqual(response.readToken, readToken)
+        XCTAssertEqual(response.manageToken, manageToken)
+        XCTAssertEqual(response.updatedAt, "2026-09-14T17:00:00Z")
+    }
+
+    func testSharedAlbumReadsPublicPayloadWithReadToken() async throws {
+        let readToken = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/brick-collector/shared-albums/\(readToken.uuidString)"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"name":"My collection","updatedAt":"2026-09-14T17:00:00Z","items":[{"setNumber":"75355-1","sortOrder":0}]}"#
+            )
+        }
+
+        let album = try await makeClient().sharedAlbum(readToken: readToken)
+
+        XCTAssertEqual(album.name, "My collection")
+        XCTAssertEqual(album.items, [SharedAlbumItem(setNumber: "75355-1", sortOrder: 0)])
+    }
+
+    func testUpdateSharedAlbumPutsCompletePayloadAndReturnsPublicAlbum() async throws {
+        let manageToken = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
+        let items = [SharedAlbumItem(setNumber: "42171-1", sortOrder: 0)]
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/brick-collector/shared-albums/\(manageToken.uuidString)"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            let body = try XCTUnwrap(Self.bodyData(from: request))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(object["name"] as? String, "Updated collection")
+            XCTAssertEqual((object["items"] as? [[String: Any]])?.count, 1)
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"name":"Updated collection","updatedAt":"2026-09-14T18:00:00Z","items":[{"setNumber":"42171-1","sortOrder":0}]}"#
+            )
+        }
+
+        let album = try await makeClient().updateSharedAlbum(
+            manageToken: manageToken,
+            name: "Updated collection",
+            items: items
+        )
+
+        XCTAssertEqual(album.name, "Updated collection")
+        XCTAssertEqual(album.items, items)
+    }
+
+    func testDeleteSharedAlbumUsesManageTokenAndExpectsNoContent() async throws {
+        let manageToken = UUID(uuidString: "33333333-3333-4333-8333-333333333333")!
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/brick-collector/shared-albums/\(manageToken.uuidString)"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            return Self.response(for: request, statusCode: 204, body: "")
+        }
+
+        try await makeClient().deleteSharedAlbum(manageToken: manageToken)
+    }
+
     func testDescribeWineUsesExpectedBodyAndReturnsSwiftContract() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "POST")
