@@ -7,6 +7,7 @@ The package currently supports:
 - barcode product lookup and translation;
 - short LEGO set description generation;
 - raw Brickset set, additional-image, and instruction caching;
+- Brick Collector LEGO Coming Soon and Last Chance set numbers;
 - Brick Collector shared albums;
 - localized wine and spirits description;
 - plain-text translation;
@@ -161,6 +162,25 @@ try await client.cacheBricksetInstructions(
 `BricksetJSON` is an alias of `JSONValue`, preserving unknown fields, nested objects, arrays, strings, numbers,
 booleans, and null values. These methods call only the public API-key-protected `/api/lego/brickset/**` routes;
 the Swift package exposes no `/api/admin/brickset/**` operation.
+
+## Brick Collector LEGO set status
+
+Retrieve only the set numbers currently listed by LEGO in its Coming Soon and Last Chance categories:
+
+```swift
+let status = try await client.legoSetStatus()
+
+for setNumber in status.comingSoon {
+    print("Coming soon: \(setNumber)")
+}
+
+for setNumber in status.lastChance {
+    print("Last chance: \(setNumber)")
+}
+```
+
+AppCore owns the LEGO page retrieval, pagination, and server cache. The Swift response deliberately contains no
+product name, price, image, URL, or availability metadata.
 
 ## Brick Collector shared albums
 

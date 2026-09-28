@@ -240,6 +240,14 @@ public final class AppCoreClient: Sendable {
         )
     }
 
+    /// Returns the set numbers listed in LEGO's Coming Soon and Last Chance categories.
+    /// Calls `GET /api/brick-collector/set-status`.
+    public func legoSetStatus() async throws -> LegoSetStatus {
+        try await send(
+            URLRequest(url: url(path: ["api", "brick-collector", "set-status"]))
+        )
+    }
+
     /// Creates a Brick Collector shared album and returns its owner tokens once.
     /// Calls `POST /api/brick-collector/shared-albums`.
     public func createSharedAlbum(

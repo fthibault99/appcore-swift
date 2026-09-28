@@ -224,6 +224,28 @@ final class AppCoreClientTests: XCTestCase {
         XCTAssertEqual(requestCount, 2)
     }
 
+    func testLegoSetStatusUsesAuthenticatedGetAndDecodesSetNumbers() async throws {
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(
+                request.url?.absoluteString,
+                "https://appcore.example/api/brick-collector/set-status"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            return Self.response(
+                for: request,
+                statusCode: 200,
+                body: #"{"comingSoon":["75457","11384"],"lastChance":["10318","75367"]}"#
+            )
+        }
+
+        let status = try await makeClient().legoSetStatus()
+
+        XCTAssertEqual(status.comingSoon, ["75457", "11384"])
+        XCTAssertEqual(status.lastChance, ["10318", "75367"])
+    }
+
     func testCreateSharedAlbumPostsTypedPayloadAndReturnsOwnerTokens() async throws {
         let id = UUID(uuidString: "11111111-1111-4111-8111-111111111111")!
         let readToken = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
