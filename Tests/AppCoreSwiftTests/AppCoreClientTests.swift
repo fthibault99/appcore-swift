@@ -8,6 +8,85 @@ final class AppCoreClientTests: XCTestCase {
         super.tearDown()
     }
 
+    func testCreateApplicationIdentityPostsWithoutBodyAndDecodesCredential() async throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789ABC")!
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/application-identities")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            XCTAssertNil(request.value(forHTTPHeaderField: "X-App-Identity-Credential"))
+            XCTAssertTrue(Self.bodyData(from: request)?.isEmpty ?? true)
+            return Self.response(
+                for: request, statusCode: 201,
+                body: #"{"id":"12345678-1234-1234-1234-123456789abc","credential":"test_identity_credential","createdAt":"2026-10-02T12:00:00.123456Z"}"#
+            )
+        }
+
+        let identity = try await makeClient().createApplicationIdentity()
+        XCTAssertEqual(identity.id, id)
+        XCTAssertEqual(identity.credential, "test_identity_credential")
+        XCTAssertEqual(identity.createdAt, "2026-10-02T12:00:00.123456Z")
+    }
+
+    func testCreateApplicationPairingCodeSendsBothCredentialsAndPreservesLeadingZeros() async throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789ABC")!
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString,
+                           "https://appcore.example/api/application-identities/\(id.uuidString)/pairing-code")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-App-Identity-Credential"), "test_identity_credential")
+            XCTAssertTrue(Self.bodyData(from: request)?.isEmpty ?? true)
+            XCTAssertNil(request.url?.query)
+            return Self.response(
+                for: request, statusCode: 201,
+                body: #"{"code":"000042","expiresAt":"2026-10-02T12:10:00Z"}"#
+            )
+        }
+
+        let pairing = try await makeClient().createApplicationPairingCode(
+            identityId: id, credential: "test_identity_credential"
+        )
+        XCTAssertEqual(pairing.code, "000042")
+        XCTAssertEqual(pairing.expiresAt, "2026-10-02T12:10:00Z")
+    }
+
+    func testCreateApplicationIdentityPropagatesAssignmentError() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(
+                for: request, statusCode: 403,
+                body: #"{"timestamp":"2026-10-02T12:00:00Z","status":403,"error":"APPLICATION_ASSIGNMENT_REQUIRED","message":"Application assignment required","path":"/api/application-identities","details":[]}"#
+            )
+        }
+        do {
+            _ = try await makeClient().createApplicationIdentity()
+            XCTFail("Expected an application assignment error")
+        } catch let AppCoreClientError.server(statusCode, response) {
+            XCTAssertEqual(statusCode, 403)
+            XCTAssertEqual(response?.error, "APPLICATION_ASSIGNMENT_REQUIRED")
+        }
+    }
+
+    func testCreateApplicationPairingCodePropagatesRejectedProof() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(
+                for: request, statusCode: 403,
+                body: #"{"timestamp":"2026-10-02T12:00:00Z","status":403,"error":"APPLICATION_IDENTITY_PROOF_REJECTED","message":"Application identity proof rejected","path":"/api/application-identities/12345678-1234-1234-1234-123456789abc/pairing-code","details":[]}"#
+            )
+        }
+        do {
+            _ = try await makeClient().createApplicationPairingCode(
+                identityId: UUID(), credential: "invalid_test_credential"
+            )
+            XCTFail("Expected an identity proof error")
+        } catch let AppCoreClientError.server(statusCode, response) {
+            XCTAssertEqual(statusCode, 403)
+            XCTAssertEqual(response?.error, "APPLICATION_IDENTITY_PROOF_REJECTED")
+        }
+    }
+
     func testBarcodeRequestUsesURLDomainAndAPIKeyHeader() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "GET")

@@ -24,6 +24,27 @@ public final class AppCoreClient: Sendable {
         self.session = session
     }
 
+    /// Creates an application identity using the application associated with the API key.
+    /// Calls `POST /api/application-identities` without a body.
+    public func createApplicationIdentity() async throws -> CreateApplicationIdentityResponse {
+        var request = URLRequest(url: url(path: ["api", "application-identities"]))
+        request.httpMethod = "POST"
+        return try await send(request)
+    }
+
+    /// Generates a temporary pairing code using the credential returned at identity creation.
+    /// Requires pairing to be enabled on the server.
+    /// Calls `POST /api/application-identities/{identityId}/pairing-code` without a body.
+    public func createApplicationPairingCode(
+        identityId: UUID,
+        credential: String
+    ) async throws -> CreateApplicationPairingCodeResponse {
+        var request = URLRequest(url: url(path: ["api", "application-identities", identityId.uuidString, "pairing-code"]))
+        request.httpMethod = "POST"
+        request.setValue(credential, forHTTPHeaderField: "X-App-Identity-Credential")
+        return try await send(request)
+    }
+
     /// Creates the MealAgain account and initial balance if absent.
     /// Calls `POST /api/mealagain/users/{userId}` without a body.
     public func createMealAgainUserIfNeeded(

@@ -4,6 +4,7 @@ A Swift 6 client package for the authenticated AppCore Spring Boot API.
 
 The package currently supports:
 
+- application identity creation and temporary pairing codes;
 - barcode product lookup and translation;
 - short LEGO set description generation;
 - raw Brickset set, additional-image, and instruction caching;
@@ -181,6 +182,32 @@ for setNumber in status.lastChance {
 
 AppCore owns the LEGO page retrieval, pagination, and server cache. The Swift response deliberately contains no
 product name, price, image, URL, or availability metadata.
+
+## Application identities and pairing codes
+
+Create an identity with the application associated with the client's API key:
+
+```swift
+let identity = try await client.createApplicationIdentity()
+// Store identity.id and identity.credential securely, for example in Keychain.
+
+let pairing = try await client.createApplicationPairingCode(
+    identityId: identity.id,
+    credential: identity.credential
+)
+// Display pairing.code until pairing.expiresAt.
+```
+
+Both operations use `POST` with an empty body and the existing `X-API-Key` authentication.
+Pairing also sends `X-App-Identity-Credential`; the identity ID alone is insufficient.
+The API key must belong to an application, and the identity must belong to that same application.
+Create the identity once and reuse its stored ID and credential when requesting new codes.
+Do not log or expose the credential. The package does not persist it automatically.
+
+The responses expose `id`, `credential`, `createdAt` and `code`, `expiresAt`, respectively.
+Timestamps remain server ISO-8601 strings, and the code remains a string to preserve leading zeros.
+The pairing route requires `appcore.identity.pairing.enabled=true` on AppCore.
+Server failures use the existing `AppCoreClientError.server` decoding.
 
 ## Brick Collector shared albums
 
