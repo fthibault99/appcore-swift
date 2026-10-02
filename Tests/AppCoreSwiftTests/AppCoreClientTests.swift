@@ -116,6 +116,65 @@ final class AppCoreClientTests: XCTestCase {
         }
     }
 
+    func testCollectionSnapshotUploadPreservesJSONAndUsesIdentityProofHeaders() async throws {
+        let id = UUID(uuidString: "12345678-1234-1234-1234-123456789ABC")!
+        let json = Data(#"{"schemaVersion":1,"generatedAt":"2026-10-02T16:42:00.123Z","summary":{"totalSpent":1234567890.1234567890123456789},"sets":[{"name":"Château","boxes":[{"missingParts":[{"quantity":2}]}]}],"minifigs":[],"extra":{"futureField":true}}"#.utf8)
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/brick-collector/collection-snapshot")
+            XCTAssertNil(request.url?.query)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-App-Identity-Id"), id.uuidString)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-App-Identity-Credential"), "test_identity_credential")
+            XCTAssertEqual(Self.bodyData(from: request), json)
+            return Self.response(for: request, statusCode: 200,
+                                 body: #"{"schemaVersion":1,"generatedAt":"2026-10-02T16:42:00.123Z","storedAt":"2026-10-02T16:42:02.123456Z"}"#)
+        }
+        let stored = try await makeClient().uploadBrickCollectorCollectionSnapshot(
+            json: json, identityId: id, credential: "test_identity_credential"
+        )
+        XCTAssertEqual(stored.schemaVersion, 1)
+        XCTAssertEqual(stored.generatedAt, "2026-10-02T16:42:00.123Z")
+        XCTAssertEqual(stored.storedAt, "2026-10-02T16:42:02.123456Z")
+    }
+
+    func testCollectionSnapshotUploadPropagatesStructuredServerErrors() async throws {
+        for (status, code) in [(401, "UNAUTHORIZED"), (403, "APPLICATION_IDENTITY_PROOF_REJECTED"),
+                               (400, "INVALID_COLLECTION_SNAPSHOT"), (413, "COLLECTION_SNAPSHOT_TOO_LARGE")] {
+            URLProtocolStub.requestHandler = { request in
+                Self.response(for: request, statusCode: status,
+                              body: """
+                              {"timestamp":"2026-10-02T16:42:00Z","status":\(status),"error":"\(code)","message":"Rejected","path":"/api/brick-collector/collection-snapshot","details":[]}
+                              """)
+            }
+            do {
+                _ = try await makeClient().uploadBrickCollectorCollectionSnapshot(
+                    json: Data("{}".utf8), identityId: UUID(), credential: "test_identity_credential"
+                )
+                XCTFail("Expected server error \(status)")
+            } catch let AppCoreClientError.server(statusCode, response) {
+                XCTAssertEqual(statusCode, status)
+                XCTAssertEqual(response?.error, code)
+            }
+        }
+    }
+
+    func testCollectionSnapshotUploadRejectsMalformedSuccessMetadata() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(for: request, statusCode: 200, body: #"{"schemaVersion":1}"#)
+        }
+        do {
+            _ = try await makeClient().uploadBrickCollectorCollectionSnapshot(
+                json: Data("{}".utf8), identityId: UUID(), credential: "test_identity_credential"
+            )
+            XCTFail("Expected a decoding error")
+        } catch AppCoreClientError.decoding {
+            // A success response must contain both required timestamps.
+        }
+    }
+
     func testBarcodeRequestUsesURLDomainAndAPIKeyHeader() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "GET")

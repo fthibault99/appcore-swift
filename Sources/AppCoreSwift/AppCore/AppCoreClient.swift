@@ -57,6 +57,23 @@ public final class AppCoreClient: Sendable {
         return try await send(request)
     }
 
+    /// Replaces the authenticated identity's complete Brick Collector collection document.
+    /// Calls `PUT /api/brick-collector/collection-snapshot` with the supplied JSON bytes unchanged.
+    /// AppCore validates the document and enforces its configured size limit (4 MiB by default).
+    public func uploadBrickCollectorCollectionSnapshot(
+        json: Data,
+        identityId: UUID,
+        credential: String
+    ) async throws -> BrickCollectorCollectionSnapshotStoredResponse {
+        var request = URLRequest(url: url(path: ["api", "brick-collector", "collection-snapshot"]))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(identityId.uuidString, forHTTPHeaderField: "X-App-Identity-Id")
+        request.setValue(credential, forHTTPHeaderField: "X-App-Identity-Credential")
+        request.httpBody = json
+        return try await send(request)
+    }
+
     /// Creates the MealAgain account and initial balance if absent.
     /// Calls `POST /api/mealagain/users/{userId}` without a body.
     public func createMealAgainUserIfNeeded(
