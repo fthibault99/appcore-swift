@@ -25,3 +25,13 @@ public struct CreateApplicationPairingCodeResponse: Codable, Equatable, Sendable
         self.expiresAt = expiresAt
     }
 }
+
+/// Whether the identity has a non-revoked, currently allowed OAuth connection.
+/// This does not prove that a remote client or its tokens are currently usable.
+public struct ApplicationConnectionStatus: Codable, Equatable, Sendable {
+    public let connected: Bool
+
+    public init(connected: Bool) {
+        self.connected = connected
+    }
+}

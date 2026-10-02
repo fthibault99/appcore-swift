@@ -87,6 +87,35 @@ final class AppCoreClientTests: XCTestCase {
         }
     }
 
+    func testConnectionStatusUsesGetAndBothCredentials() async throws {
+        let id = UUID()
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/application-identities/\(id.uuidString)/connection-status")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-App-Identity-Credential"), "test_identity_credential")
+            XCTAssertNil(request.url?.query)
+            XCTAssertTrue(Self.bodyData(from: request)?.isEmpty ?? true)
+            return Self.response(for: request, statusCode: 200, body: #"{"connected":true}"#)
+        }
+        let status = try await makeClient().applicationConnectionStatus(identityId: id, credential: "test_identity_credential")
+        XCTAssertTrue(status.connected)
+    }
+
+    func testConnectionStatusPropagatesProofErrors() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(for: request, statusCode: 403,
+                          body: #"{"timestamp":"2026-10-02T12:00:00Z","status":403,"error":"APPLICATION_IDENTITY_PROOF_REJECTED","message":"Rejected","path":"/api/application-identities/example/connection-status","details":[]}"#)
+        }
+        do {
+            _ = try await makeClient().applicationConnectionStatus(identityId: UUID(), credential: "invalid_test_credential")
+            XCTFail("Expected proof rejection")
+        } catch let AppCoreClientError.server(statusCode, response) {
+            XCTAssertEqual(statusCode, 403)
+            XCTAssertEqual(response?.error, "APPLICATION_IDENTITY_PROOF_REJECTED")
+        }
+    }
+
     func testBarcodeRequestUsesURLDomainAndAPIKeyHeader() async throws {
         URLProtocolStub.requestHandler = { request in
             XCTAssertEqual(request.httpMethod, "GET")

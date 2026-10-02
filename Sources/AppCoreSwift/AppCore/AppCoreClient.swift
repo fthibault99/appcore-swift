@@ -45,6 +45,18 @@ public final class AppCoreClient: Sendable {
         return try await send(request)
     }
 
+    /// Reads the persisted OAuth link with the same identity proof used for pairing.
+    /// Calls `GET /api/application-identities/{identityId}/connection-status`.
+    public func applicationConnectionStatus(
+        identityId: UUID,
+        credential: String
+    ) async throws -> ApplicationConnectionStatus {
+        var request = URLRequest(url: url(path: ["api", "application-identities", identityId.uuidString, "connection-status"]))
+        request.httpMethod = "GET"
+        request.setValue(credential, forHTTPHeaderField: "X-App-Identity-Credential")
+        return try await send(request)
+    }
+
     /// Creates the MealAgain account and initial balance if absent.
     /// Calls `POST /api/mealagain/users/{userId}` without a body.
     public func createMealAgainUserIfNeeded(

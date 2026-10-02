@@ -209,6 +209,18 @@ Timestamps remain server ISO-8601 strings, and the code remains a string to pres
 The pairing route requires `appcore.identity.pairing.enabled=true` on AppCore.
 Server failures use the existing `AppCoreClientError.server` decoding.
 
+Read the persisted OAuth connection using the same ID and credential:
+
+```swift
+let status = try await client.applicationConnectionStatus(
+    identityId: identity.id, credential: identity.credential
+)
+// status.connected indicates a non-revoked link to a currently allowed OAuth client.
+```
+
+This GET requires OAuth and pairing enabled on AppCore, sends both proof headers, and
+returns only `connected`. It does not validate token expiry or the remote client's health.
+
 ## Brick Collector shared albums
 
 Create an album from its name and ordered set references. Save both returned tokens securely; AppCore returns the
