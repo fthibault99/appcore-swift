@@ -57,6 +57,18 @@ public final class AppCoreClient: Sendable {
         return try await send(request)
     }
 
+    /// Disconnects all OAuth links and pending codes while preserving the identity and stored data.
+    /// Calls `DELETE /api/application-identities/{identityId}/connections` without a body.
+    public func disconnectApplicationConnections(
+        identityId: UUID,
+        credential: String
+    ) async throws -> ApplicationConnectionStatus {
+        var request = URLRequest(url: url(path: ["api", "application-identities", identityId.uuidString, "connections"]))
+        request.httpMethod = "DELETE"
+        request.setValue(credential, forHTTPHeaderField: "X-App-Identity-Credential")
+        return try await send(request)
+    }
+
     /// Replaces the authenticated identity's complete Brick Collector collection document.
     /// Calls `PUT /api/brick-collector/collection-snapshot` with the supplied JSON bytes unchanged.
     /// AppCore validates the document and enforces its configured size limit (4 MiB by default).

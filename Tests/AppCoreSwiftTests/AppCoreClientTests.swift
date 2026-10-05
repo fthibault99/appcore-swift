@@ -116,6 +116,36 @@ final class AppCoreClientTests: XCTestCase {
         }
     }
 
+    func testDisconnectPreservesIdentityAndUsesDeleteWithProof() async throws {
+        let id = UUID()
+        URLProtocolStub.requestHandler = { request in
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.absoluteString, "https://appcore.example/api/application-identities/\(id.uuidString)/connections")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-API-Key"), "ac_test_secret")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "X-App-Identity-Credential"), "test_identity_credential")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Accept"), "application/json")
+            XCTAssertNil(request.url?.query)
+            XCTAssertTrue(Self.bodyData(from: request)?.isEmpty ?? true)
+            return Self.response(for: request, statusCode: 200, body: #"{"connected":false}"#)
+        }
+        let status = try await makeClient().disconnectApplicationConnections(identityId: id, credential: "test_identity_credential")
+        XCTAssertFalse(status.connected)
+    }
+
+    func testDisconnectPropagatesProofErrors() async throws {
+        URLProtocolStub.requestHandler = { request in
+            Self.response(for: request, statusCode: 403,
+                body: #"{"timestamp":"2026-10-04T12:00:00Z","status":403,"error":"APPLICATION_IDENTITY_PROOF_REJECTED","message":"Rejected","path":"/api/application-identities/example/connections","details":[]}"#)
+        }
+        do {
+            _ = try await makeClient().disconnectApplicationConnections(identityId: UUID(), credential: "invalid_test_credential")
+            XCTFail("Expected proof rejection")
+        } catch let AppCoreClientError.server(statusCode, response) {
+            XCTAssertEqual(statusCode, 403)
+            XCTAssertEqual(response?.error, "APPLICATION_IDENTITY_PROOF_REJECTED")
+        }
+    }
+
     func testCollectionSnapshotUploadPreservesJSONAndUsesIdentityProofHeaders() async throws {
         let id = UUID(uuidString: "12345678-1234-1234-1234-123456789ABC")!
         let json = Data(#"{"schemaVersion":1,"generatedAt":"2026-10-02T16:42:00.123Z","summary":{"totalSpent":1234567890.1234567890123456789},"sets":[{"name":"Château","boxes":[{"missingParts":[{"quantity":2}]}]}],"minifigs":[],"extra":{"futureField":true}}"#.utf8)
